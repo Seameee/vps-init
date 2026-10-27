@@ -40,8 +40,11 @@ curl -fsSL $REPO/scripts/vps-check.sh -o /tmp/vps-check.sh
 sh /tmp/vps-check.sh recon | tee /tmp/recon.out      # Alpine/Debian 通用
 ```
 
-其余文件同理（`$REPO/scripts/f2b-guard.sh`、`$REPO/assets/zshrc.zshrc` 等）。
-**本地有仓库副本时**直接用本地路径，不必联网。
+其余文件同理（`$REPO/scripts/f2b-guard.sh`、`$REPO/assets/zshrc.zshrc`、
+`$REPO/references/<name>.md`）。**本地已有仓库副本时**直接用本地路径，不必联网。
+
+技能目录本身就是该仓库的克隆，更新即 `git -C ~/.dsh/skills/vps-init pull --ff-only`。
+改了技能要发布：`git add -A && git commit && git push`（改完先本地 `sh -n` 过一遍语法）。
 
 ## 分层
 

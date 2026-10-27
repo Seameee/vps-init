@@ -31,7 +31,7 @@ chmod 600 /root/.ssh/authorized_keys
 ssh-keygen -l -f /root/.ssh/authorized_keys   # 必须能打印出指纹才算数
 ```
 
-> ❌ **不要用 `install /dev/null <file>` 来"初始化"authorized_keys**：那会把已有文件**截断成 0 字节**（指纹查不到、密钥登录失败）。也不要 `install -m 600 -o user -g user /dev/null ...` 之后再追加——顺序错了同样丢内容。
+> ❌ **不要用 `install /dev/null <file>` 来"初始化"authorized_keys**：那会把已有文件**截断成 0 字节**（指纹查不到、密钥登录失败）。
 >
 > ⚠️ 用 `sudo` 跑脚本时 `$HOME` 可能仍指向 root，导致公钥写成 root:root 而 sshd 拒绝 → **密钥登录失败 + 密码已关 = 锁死**。
 
@@ -44,7 +44,7 @@ systemctl enable --now atd
 # 20 分钟后把 SSH 恢复为「允许密码 + 22 端口」的保守配置
 cat > /root/ssh-deadman.sh <<'EOF'
 #!/bin/bash
-# 保命开关（修正版）：直接重写加固文件，【不】依赖 drop-in 的加载顺序。
+# 保命开关：直接重写加固文件，【不】依赖 drop-in 的加载顺序。
 set -u
 HD=/etc/ssh/sshd_config.d/00-hardening.conf
 install -d -m 755 /etc/ssh/sshd_config.d
@@ -56,7 +56,6 @@ PermitRootLogin prohibit-password
 PubkeyAuthentication yes
 Port 22
 CONF
-[ -f /etc/ssh/sshd_config.d/00-deadman.conf ] && mv -f /etc/ssh/sshd_config.d/00-deadman.conf /root/deadman.conf.fired 2>/dev/null || true
 if /usr/sbin/sshd -t; then
   systemctl restart ssh
   logger -t deadman "SSH deadman switch fired; sshd restored to password+port22"
@@ -71,16 +70,9 @@ atq
 
 ### ⚠️ 死手开关的 3 条实现陷阱
 
-1. **`Port` 是多值参数，不能用"覆盖"的思路回退。**
-   写 `00-deadman.conf` 含 `Port 22`、`00-hardening.conf` 含 `Port 22222`，
-   `sshd -T` 得到的是 **`port 22 port 22222`（两个都在听）**，端口没有回退；
-   而同一次测试里 `PasswordAuthentication yes`（单值参数）**确实覆盖成功**。
-   → **单值参数受"首个取值生效"约束；`Port`/`ListenAddress`/`AllowUsers` 等
-   多值参数会累加**。死手开关若涉及端口，必须**改写/移除**加固文件里的 `Port` 行。
-2. **文件名顺序对单值参数至关重要。** 写成 `99-deadman.conf` 对单值参数**无效**
-   （`00-` 先加载、首个取值生效）。要覆盖单值参数就必须排在前面。
-3. **不要用 `rm -f` 删加固文件**，也不要 `pkill`/`stop sshd`。把内容**重写**
-   （`>` 截断后重写）比删除更安全，且不会因"删了却起不来"造成二次事故。
+1. **`Port` 是多值参数，不能用"覆盖"的思路回退。** 写 `00-deadman.conf` 含 `Port 22`、`00-hardening.conf` 含 `Port 22222`，`sshd -T` 得到的是 **`port 22 port 22222`（两个都在听）**，端口没有回退；而同一次测试里 `PasswordAuthentication yes`（单值参数）**确实覆盖成功**。→ **单值参数受"首个取值生效"约束；`Port`/`ListenAddress`/`AllowUsers` 等多值参数会累加**。死手开关若涉及端口，必须**改写/移除**加固文件里的 `Port` 行。
+2. **文件名顺序对单值参数至关重要。** 写成 `99-deadman.conf` 对单值参数**无效**（`00-` 先加载、首个取值生效）。要覆盖单值参数就必须排在前面。
+3. **不要用 `rm -f` 删加固文件**，也不要 `pkill`/`stop sshd`。把内容**重写**（`>` 截断后重写）比删除更安全，且不会因"删了却起不来"造成二次事故。
 
 ### ✅ 挂上之后必须实弹验证
 
@@ -98,7 +90,7 @@ ss -tlnp | grep -cE ':22 |:22222 '                  # 确认真实监听
 # 4) 确认当前会话没断（Debian 的 ssh 单元是 KillMode=process，restart 不会杀活动会话）
 ```
 
-**确认新配置可用后**：`atq` → `atrm <job号>`，并删掉 `00-deadman.conf`（或留空覆盖）。
+**确认新配置可用后**：`atq` → `atrm <job号>`。
 
 ## 3. 先判断 ssh 是 service 还是 socket 激活
 
@@ -122,7 +114,7 @@ systemctl daemon-reload
 systemctl restart ssh.socket
 ```
 
-**若是传统 service**（如 `ssh.service active` / `ssh.socket disabled`），改 `sshd_config` 的 Port 即可。
+**若是传统 service**（`ssh.service active` / `ssh.socket disabled`），改 `sshd_config` 的 Port 即可。
 
 ## 4. 确认 drop-in 真的会被加载
 
@@ -175,8 +167,7 @@ ss -tlnp | grep sshd      # 应看到 22 和 22222 都在听
 ssh -p 22222 <user>@<host> 'whoami; sudo -n true && echo "sudo OK"'
 ```
 
-通过后，才删掉 drop-in 里的 `Port 22`（此时 sshd 只监听新端口，旧连接仍保持），再 `systemctl reload ssh`。
-第 6 步验证通过前，**不要**再收紧 `PermitRootLogin no` 之类；要改就确认已有非 root sudo 用户能登录。
+通过后，才删掉 drop-in 里的 `Port 22`，再 `systemctl reload ssh`。第 6 步验证通过前，**不要**再收紧 `PermitRootLogin no` 之类；要改就确认已有非 root sudo 用户能登录。
 
 ## 7. SSH 常见陷阱清单
 
@@ -185,7 +176,7 @@ ssh -p 22222 <user>@<host> 'whoami; sudo -n true && echo "sudo OK"'
 | PATH 遮蔽 | `sshd -T` 显示 port 22 / password yes，与运行中服务不符 | 用 `/proc/<pid>/exe` 取真实二进制 |
 | socket 激活 | 改了 Port 没反应 | 改 `ssh.socket` 的 ListenStream |
 | Include 缺失 | drop-in 写了不生效 | 主配置补 Include |
-| drop-in 文件名顺序 | 被后加载的文件覆盖 | 用 `00-` 前缀确保先加载，且避免与他人的文件冲突 |
+| drop-in 文件名顺序 | 被后加载的文件覆盖 | 用 `00-` 前缀确保先加载 |
 | 权限错误 | 密钥登录失败 | `700 .ssh` / `600 authorized_keys` / 属主正确 |
 | cloud-init 覆盖 | 重启后又允许密码登录 | 检查 `/etc/cloud/cloud.cfg.d/*.cfg` 的 `ssh_pwauth` |
 | `PasswordAuthentication` 与 `ChallengeResponseAuthentication` | 仍有密码提示 | 同时设 `KbdInteractiveAuthentication no` |
@@ -197,10 +188,9 @@ ssh -p 22222 <user>@<host> 'whoami; sudo -n true && echo "sudo OK"'
 |---|---|---|
 | 单机 VPS、规则简单 | **ufw** | 上手快、规则清晰、自动处理 v4/v6 |
 | 复杂规则 / 需要 set、map、限速 | nftables 原生 | 更灵活 |
-| 装了 Docker | 两者都要额外处理 | 见 §12 Docker 绕过 |
+| 装了 Docker | 两者都要额外处理 | 见 §11 Docker 绕过 |
 
-> ufw 0.36.2 在底层就是 nftables（`table ip filter` / `ip6 filter` 由 iptables-nft 管理）。
-> **不要 ufw 与裸 nft 混写同一张 filter 表**，会互相覆盖。
+> ufw 0.36.2 在底层就是 nftables（`table ip filter` / `ip6 filter` 由 iptables-nft 管理）。**不要 ufw 与裸 nft 混写同一张 filter 表**，会互相覆盖。
 
 ## 9. 启用顺序（错了会锁死自己）
 
@@ -242,7 +232,7 @@ chain ufw-before-input {
 
 `ct state related,established accept` 排在放行规则之前，所以**已建立的连接不受影响，只有新连接会被新规则过滤**。
 
-> 但这**不意味着你可以不挂死手开关**：一旦你断开当前会话再重连，就会走新规则。顺序仍是「先放行端口，再启用」，并保持一个已认证会话不关。
+> 但这**不意味着你可以不挂死手开关**：一旦你断开当前会话再重连，就会走新规则。
 
 ## 10. 验证：找权威证据
 
@@ -256,7 +246,7 @@ chain ufw-before-input {
 nft list table ip filter | grep -E 'hook input|policy'
 # 期望：type filter hook input priority filter; policy drop;
 nft list chain ip filter ufw-user-input
-# 期望：只列出你放行的端口，且 counter 数字在增长（说明真有过流量且被放行）
+# 期望：只列出你放行的端口，且 counter 数字在增长
 ```
 
 真实形态：
@@ -283,9 +273,7 @@ ssh -p 22222 user@host 'echo ok'   # 放行的端口能登录
 curl -m 5 http://host/             # 未放行端口应明确失败（timeout / refused）
 ```
 
-> 关键验证：`nft list table ip filter` 必须出现 `policy drop`，
-> 且 `nft list chain ip filter ufw-user-input` 里的 dport 必须等于**真实 SSH 端口**
-> （改端口后忘了更新防火墙，是"放行了却连不上"的头号原因）。
+> **关键验证**：`nft list table ip filter` 必须出现 `policy drop`，且 `nft list chain ip filter ufw-user-input` 里的 dport 必须等于**真实 SSH 端口**（改端口后忘了更新防火墙，是"放行了却连不上"的头号原因）。
 
 ## 11. Docker 与 ufw 的著名冲突
 
@@ -299,8 +287,6 @@ curl -m 5 http://host/             # 未放行端口应明确失败（timeout / 
 1. **容器端口一律绑回环**：`-p 127.0.0.1:8080:80`（最简单、最安全）
 2. **用 `DOCKER-USER` 链**：在 `filter` 表的 `DOCKER-USER` 链里加限制规则（Docker 官方推荐位置）
 3. **装 `ufw-docker`**：自动把 ufw 规则同步到 `DOCKER-USER`
-
-排查命令：
 
 ```bash
 docker ps --format '{{.Names}}\t{{.Ports}}' | grep -E '0\.0\.0\.0|:::'

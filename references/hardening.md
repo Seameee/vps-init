@@ -68,12 +68,7 @@ timeout 100 unattended-upgrade --dry-run --verbose 2>&1 | grep -i "Allowed origi
 grep -nE 'Origins-Pattern|Allowed-Origins' /etc/apt/apt.conf.d/50unattended-upgrades
 ```
 
-Ubuntu 实测生效值（`--dry-run --verbose`）：
-
-```
-Allowed origins are: o=Ubuntu,a=resolute, o=Ubuntu,a=resolute-security,
-  o=UbuntuESMApps,a=resolute-apps-security, o=UbuntuESM,a=resolute-infra-security
-```
+Ubuntu 实测生效值（`--dry-run --verbose`）：`Allowed origins are: o=Ubuntu,a=resolute, o=Ubuntu,a=resolute-security, o=UbuntuESMApps,a=resolute-apps-security, o=UbuntuESM,a=resolute-infra-security`
 
 **Debian 13 的实际写法**：
 
@@ -296,6 +291,10 @@ SH
 visudo -c
 ```
 
+### ⚠️ 陷阱：只做 `apt purge snapd` 是不够的
+
+purge 之后 `snap` 命令没了、`/snap` 目录也删了，但 **`sudo` 与登录 shell 的 PATH 里仍留着 `/snap/bin`**——分别来自 `/etc/sudoers` 的 `secure_path`、`/etc/environment`、`/etc/profile.d/apps-bin-path.sh`。**apt purge 不会清理这些**，必须按上面第 3 步手动清并用 `bash -lc 'echo $PATH'` 复验。
+
 **验证（必须做，否则你以为清干净了）**：
 
 ```bash
@@ -306,10 +305,6 @@ apt-cache policy snapd | grep Candidate   # 应为 (none) ← 证明 Pin 生效
 bash -lc 'echo $PATH' | grep snap && echo "⚠️ PATH 仍有残留" || echo "PATH 干净"
 grep -rn '/snap/bin' /etc/environment /etc/sudoers /etc/profile.d/ 2>/dev/null
 ```
-
-### ⚠️ 陷阱：只做 `apt purge snapd` 是不够的
-
-purge 之后 `snap` 命令没了、`/snap` 目录也删了，但 **`sudo` 与登录 shell 的 PATH 里仍留着 `/snap/bin`**——分别来自 `/etc/sudoers` 的 `secure_path`、`/etc/environment`、`/etc/profile.d/apps-bin-path.sh`。**apt purge 不会清理这些**。
 
 ### 副作用：想装 firefox/chromium 会报错（这是预期行为）
 
@@ -334,6 +329,6 @@ apt-get update && apt-get install -y firefox
 
 - `passwd -l root`：锁定 root 密码（不影响密钥登录）。仅在确认有非 root sudo 用户可登录后执行。
 - `cloud-init`：若镜像带 cloud-init，它会管理 sshd 配置与 root 登录策略（`/etc/cloud/cloud.cfg` 有 `disable_root: true`）。改 SSH 前先看 `/etc/cloud/cloud.cfg.d/*.cfg` 里的 `ssh_pwauth` / `disable_root`，否则重启后被覆盖。
-- 定期巡检：`lynis` 或本 skill 的 `scripts/preflight.sh` 重跑做基线对比。
+- 定期巡检：`lynis` 或本 skill 的 `sh scripts/vps-check.sh recon` 重跑做基线对比。
 
 > 验收：`sh scripts/vps-check.sh gate`

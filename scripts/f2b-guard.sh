@@ -88,10 +88,13 @@ check() {
     return 1
   fi
 
-  # 兜底检查：ignoreip 不能只有回环
+  # 兜底检查：ignoreip 不能只有回环（IPv4 与 IPv6 都要认，纯 IPv6 机器上
+  # 管理地址就是 IPv6，只认点分十进制会误判成"没有任何非回环 IP"）
   nonloop=$(echo "$line" \
-    | grep -oE '[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]+)?' \
-    | grep -vE '^127\.' || true)
+    | sed 's/^[^=]*=//' \
+    | tr ' ' '\n' \
+    | grep -vE '^(|127\..*|::1(/[0-9]+)?|localhost)$' \
+    | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]+)?$|^[0-9a-fA-F:]+(/[0-9]+)?$' || true)
   if [ -z "$nonloop" ]; then
     echo "❌ ignoreip 里没有任何非回环 IP（当前只有：$(echo "$line" | tr -s ' '))" >&2
     echo "   → 全端口封禁下这会让你无法登录" >&2

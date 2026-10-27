@@ -63,7 +63,28 @@ ssh_ports() { list_ports | awk '/ssh/ {print}' ; }
 f2b_jails() {
   fail2ban-client status 2>/dev/null | sed -n 's/.*Jail list:[[:space:]]*//p' | tr -d ' ' | tr ',' ' '
 }
-# 从 fail2ban-regex 输出里取 matched 数（"Lines: 8 lines, 3 ignored, 5 matched, 0 missed"）
+# TCP LISTEN 的本地地址:端口（ss/nawk 通用，只用第 5 列）
+listen_tcp() {
+  list_ports | awk '$1=="tcp" && $2=="LISTEN" {print $5}' | sort -u
+}
+# 用合成样本验证 filter 真的能匹配（新机器没有攻击流量，不能靠线上日志）
+# 只做事实陈述；是否算通过由调用方（gate）决定。返回 0 = 至少一个 filter 命中。
+filter_smoke() {
+  _s=/tmp/vps-init-filter-sample.$$
+  {
+    echo "Oct 27 12:00:00 sample sshd-session[123]: Failed password for invalid user admin from 203.0.113.66 port 5555 ssh2"
+    echo "Oct 27 12:00:01 sample sshd-session[124]: Connection closed by 203.0.113.66 port 5678 [preauth]"
+  } > "$_s"
+  _hit=0
+  for _f in /etc/fail2ban/filter.d/vps-init-sshd.conf /etc/fail2ban/filter.d/sshd.conf; do
+    [ -f "$_f" ] || continue
+    _m=$(count_matched "$_s" "$_f")
+    echo "    filter $(basename "$_f"): matched=${_m:-?}"
+    [ "${_m:-0}" -gt 0 ] 2>/dev/null && _hit=1
+  done
+  rm -f "$_s"
+  return $((1 - _hit))
+}
 count_matched() {
   fail2ban-regex "$1" "$2" 2>/dev/null \
     | awk '/^Lines:/ {for (i=2;i<=NF;i++) if ($i ~ /^matched,?$/) {print $(i-1); exit}}'
@@ -224,16 +245,8 @@ recon() {
     else
       iptables -S 2>/dev/null | grep -E 'f2b|fail2ban' | head -6 | sed 's/^/  iptables: /'
     fi
-    echo "  --- filter 匹配自检（matched 必须 > 0，否则等于没装）---"
-    for pair in "sshd:/var/log/messages" "sshd:/var/log/auth.log" "sshesame:/var/log/sshesame.log"; do
-      filt=${pair%%:*}; lg=${pair#*:}
-      f="/etc/fail2ban/filter.d/vps-init-${filt}.conf"
-      [ -f "$f" ] || f="/etc/fail2ban/filter.d/${filt}.conf"
-      [ -f "$lg" ] && [ -f "$f" ] && {
-        m=$(count_matched "$lg" "$f")
-        echo "    $filt vs $lg: matched=${m:-?}"
-      }
-    done
+    echo "  --- filter 自检（对合成攻击样本，matched 必须 > 0）---"
+    filter_smoke
   else
     echo "fail2ban: 未安装"
   fi
@@ -263,14 +276,20 @@ gate() {
     P=$("$RB" -T 2>/dev/null | awk '/^port /{printf "%s ", $2}')
     PA=$("$RB" -T 2>/dev/null | awk '/^passwordauthentication /{print $2}')
     echo "  sshd 生效: port=[$P] passwordauthentication=$PA"
-    case "$P" in *22\ *) ok 'SSH 在 22 端口监听' ;; *) bad "未在 22 监听（可能在蜜罐端口，确认是否预期）" ;; esac
+    [ -n "${P:-}" ] && ok "sshd 配置了端口: $P" || bad 'sshd -T 没有输出 port'
+    case " $P " in
+      *" 22 "*) echo "  [--]   22 在监听列表里（若 22 是蜜罐端口则正常）" ;;
+    esac
     [ "$PA" = no ] && ok '密码认证已禁用' || bad "passwordauthentication=$PA（加固目标通常为 no）"
   else
     bad '未找到运行中的 sshd'
   fi
 
   L=$(list_ports)
-  echo "$L" | grep -qE ':(22|22222) .*LISTEN' && ok 'ss/netstat 能看到 SSH 监听' || bad '看不到 SSH 监听端口'
+  # 校验 sshd -T 报的端口真的在 LISTEN（不能只看:ss 的输出格式）
+  for p in ${P:-}; do
+    listen_tcp | grep -qE "[:.]$p\$" && ok "端口 $p 在 LISTEN" || bad "sshd -T 报端口 $p，但 ss 里没有 LISTEN"
+  done
   echo "$L" | sed 's/^/    /'
 
   if have ufw; then
@@ -290,25 +309,13 @@ gate() {
   fi
 
   # fail2ban：filter 真的能匹配吗（禁密码后内置 filter 会静默 0 匹配）
+  # 判据 = 对合成攻击样本能匹配；线上日志有没有命中取决于有没有攻击，
+  # 新机器上必然是 0，不能拿它当门禁（否则永远过不了）。
   if have fail2ban-client; then
     for j in $(f2b_jails); do
       echo "  [$j] $(fail2ban-client status "$j" 2>/dev/null | grep -E 'Currently banned|Total failed|File list' | tr -s ' \t' ' ' | tr '\n' ' ')"
     done
-    hit=0
-    for pair in "sshd:/var/log/messages" "sshd:/var/log/auth.log" "sshesame:/var/log/sshesame.log"; do
-      filt=${pair%%:*}; lg=${pair#*:}
-      f="/etc/fail2ban/filter.d/vps-init-${filt}.conf"
-      [ -f "$f" ] || f="/etc/fail2ban/filter.d/${filt}.conf"
-      [ -f "$lg" ] && [ -f "$f" ] || continue
-      m=$(count_matched "$lg" "$f")
-      if [ "${m:-0}" -gt 0 ] 2>/dev/null; then
-        ok "$filt filter 匹配到 $m 行（$lg）"
-        hit=1
-      else
-        bad "$filt filter 对 $lg 匹配 0 行 -> jail 装了等于没装（见 fail2ban.md / alpine.md §7）"
-      fi
-    done
-    [ "$hit" -eq 0 ] && bad '没有任何 filter 完成匹配自检'
+    filter_smoke || bad '没有 filter 匹配上合成样本'
   else
     bad 'fail2ban 未安装（若在 Tier 1 计划内则算失败）'
   fi

@@ -13,7 +13,6 @@
 ## 1. 坑 3（最隐蔽）：`defaults-debian.conf` 让 fail2ban 读不到 SSH 日志
 
 现象：制造 5 次真实失败登录后 `fail2ban-client status sshd` 仍是 `Currently failed: 0` / `Total failed: 0`。
-
 根因：Debian 13 的 OpenSSH 是 **10.0p2**，SSH 会话进程改名成 **`sshd-session`**（监听进程仍是 `sshd`）：
 
 ```
@@ -92,7 +91,7 @@ grep -iE "Ignore|Ban|Found" /var/log/fail2ban.log | tail
 
 > ⚠️ `journalctl -o cat` 会剥掉时间戳/主机名前缀，导致**全部 missed**——那是测试方法错，不是 filter 错。**必须用默认输出格式**。
 >
-> **本质**：OpenSSH 升级改变了进程名，fail2ban 的发行版默认配置没跟上。凡是"安全组件 + 系统主组件升级"的组合都要怀疑这种错配。**判断方法**：不看配置写得多正确，看 `Total failed` 在制造失败后**是否增长**。
+> **本质**：OpenSSH 升级改了进程名，fail2ban 的发行版默认配置没跟上。凡是"安全组件 + 系统主组件升级"都要怀疑这种错配。**判断方法**：不看配置写得多正确，看 `Total failed` 制造失败后**是否增长**。
 
 ## 2. 坑 1：默认 banaction 是 nftables，但 nftables 包不装
 
@@ -189,7 +188,7 @@ printf '%s\n' '<跳板机IP>' '<其他管理IP>' > /etc/fail2ban/guard-ips
 
 ③ **兜底**：`ignoreip` 至少要有一个非回环 IP，防止被清成只剩 `127.0.0.1/::1`。
 
-> 设计理由：**管理 IP 会变**（换网络、换跳板、多人运维），硬编码进脚本会立刻失效并产生误判；自动取当前连接 IP 则永远跟随实际。
+> 设计理由：**管理 IP 会变**（换网络、换跳板、多人运维），硬编码进脚本会立刻失效；自动取当前连接 IP 则永远跟随实际。
 
 实测守卫行为（Debian 13，全程无硬编码）：
 
@@ -208,7 +207,7 @@ $ f2b-guard restart    # ⛔ 守卫拦截：未重启 fail2ban（避免把自己
 
 **防线 3：确认有带外恢复通道**——VNC/控制台可用？有第二个可连的 IP？有跳板机？**没有兜底就不要改 fail2ban。**
 
-绝对不要做：① 为测试封禁逻辑移除 `ignoreip` 里的管理 IP（**唯一**把你锁死的操作，"只测一下"也不安全）；② 在 allports jail 上用管理 IP 做封禁测试（单次命中即失联）；③ 假设"等它过期"可行（`recidive` 会把反复违规升级成长封，默认 1 周）；④ 用 `>/dev/null` 掩盖 fail2ban 命令的报错（会让你误以为配置已生效）。
+绝对不要做：① 为测试移除 `ignoreip` 里的管理 IP（**唯一**把你锁死的操作）；② 在 allports jail 上用管理 IP 做封禁测试（单次命中即失联）；③ 假设"等它过期"可行（`recidive` 会升级成长封，默认 1 周）；④ 用 `>/dev/null` 掩盖 fail2ban 报错。
 
 安全的测试方式：
 
@@ -220,14 +219,7 @@ fail2ban-client set honeypot-ssh banip 203.0.113.66                    # ④ TES
 fail2ban-client set honeypot-ssh unbanip 203.0.113.66
 ```
 
-已经锁死了：详见 `rollback.md` 第 4 节，最快路径是**从另一个 IP 连进去解封**：
-
-```bash
-ssh -J user@jump.host -p 22222 root@<target> \
-  'fail2ban-client set honeypot-ssh unbanip <你的IP>';
-```
-
-> `ProxyCommand` 含 `%h:%p` 时不要写在带引号的 `-o` 里（会报 `Bad stdio forwarding specification`），改用 `ssh -F <配置文件>`。
+已经锁死了：见 `rollback.md` §4，最快路径是**从另一个 IP 连进去解封**（`ssh -J user@jump.host -p 22222 root@<target> 'fail2ban-client set honeypot-ssh unbanip <你的IP>'`）。⚠️ `ProxyCommand` 含 `%h:%p` 时不要写在带引号的 `-o` 里（报 `Bad stdio forwarding specification`），改用 `ssh -F <配置文件>`。
 
 ## 5. 生效与关键验证
 
@@ -279,9 +271,9 @@ table inet f2b-table {
    ufw status numbered                        # 目视确认只剩合法规则
    ```
 
-2. **不要在生产机上做规则规模测试**。用容器/临时 VM，或纯计算：nft 集合的优势来自算法（常数时间查找 vs 线性遍历），不需要污染真实防火墙来证明。
+2. **不要在生产机上做规则规模测试**。用容器/临时 VM，或纯推理：nft 集合的优势来自算法（常数时间查找 vs 线性遍历），不需要污染真实防火墙来证明。
 
-3. **不要用 `nft flush set` 清空封禁**：它能在内核层原子清空集合，**但不同步 fail2ban 状态**——fail2ban 仍认为那些 IP 被封着，于是一个真实攻击者封禁（`47.251.249.41`）被**静默解除**了，而 `fail2ban-client get sshd banip` 还显示它被封。正确做法：
+3. **不要用 `nft flush set` 清空封禁**：内核层原子清空，**但不同步 fail2ban 状态**——fail2ban 仍认为那些 IP 被封着，于是一个真实攻击者封禁（`47.251.249.41`）被**静默解除**，而 `fail2ban-client get sshd banip` 还显示它被封。正确做法：
 
    ```bash
    fail2ban-client set <jail> unbanip <IP>     # 或 unbanip --all 清空该 jail
@@ -318,7 +310,7 @@ ignoreregex =
 CONF
 ```
 
-**设计取舍**：只匹配**认证相关**行，**不匹配** `[channel N] command ...` / `session requested`。攻击者成功登录后会连发几十条命令（实测真实攻击者 `73.147.19.171` 发了 30 条）：
+**设计取舍**：只匹配**认证相关**行，**不匹配** `[channel N] command ...` / `session requested`。攻击者登录后会连发几十条命令（实测 `73.147.19.171` 发了 30 条）：
 
 ```
 [channel 4] command "ps | grep '[Mm]iner'" requested
@@ -340,9 +332,7 @@ CONF
 | `^\s*<HOST>:\d+\]\s` | 33 matched |
 | `^<HOST>` | **0 matched** |
 
-原因：fail2ban **先剥离日期前缀**，剥离后剩余文本并不从行首 `[` 开始，所以 `^\[` 永远匹配不上——**而且不报语法错误**，只是静默 0 命中。这个坑极难发现：配置看着完全正常、`fail2ban-client status` 不报错，但 `Total failed` 永远是 0。**唯一可靠的判断是 `fail2ban-regex` 的 matched 数 > 0。**
-
-> 顺带澄清：fail2ban **支持** `(?:...)` 非捕获组（它自己的日期模板里就在用），真正的问题只是行首锚定位置。
+原因：fail2ban **先剥离日期前缀**，剥离后剩余文本并不从行首 `[` 开始，所以 `^\[` 永远匹配不上——**而且不报语法错误**，只是静默 0 命中。这个坑极难发现：配置看着正常、`fail2ban-client status` 不报错，但 `Total failed` 永远是 0。**唯一可靠的判断是 `fail2ban-regex` 的 matched 数 > 0。**（顺带澄清：fail2ban **支持** `(?:...)` 非捕获组，真正的问题只是行首锚定位置。）
 
 验证：
 
@@ -397,6 +387,6 @@ meta l4proto tcp ip saddr @addr-set-honeypot-ssh reject with icmp port-unreachab
 
 `recidive` 读 `/var/log/fail2ban.log`，把反复被封的 IP 升级为长期封禁（实测 1 周）。链路：蜜罐封禁 → 写入 fail2ban.log → recidive 再升级。
 
-注意：**`ignoreip` 必须包含管理 IP**，否则测试连自己的蜜罐就会被封（实测 `127.0.0.1` 触发了 `Ignore 127.0.0.1 by ignoreself rule`）；**蜜罐日志量大**（攻击者每条命令一行），必须给 journald 设限额（`SystemMaxUse=200M`，见 `hardening.md`）；不用担心"封了 IP 蜜罐就没用"——封禁按 IP，新 IP 照样能进来触发记录，老 IP 被拒本身就是收益。
+注意：**`ignoreip` 必须包含管理 IP**，否则测试连自己的蜜罐就会被封（实测 `127.0.0.1` 触发 `Ignore 127.0.0.1 by ignoreself rule`）；**蜜罐日志量大**（攻击者每条命令一行），必须给 journald 设限额（`SystemMaxUse=200M`，见 `hardening.md` §3）；"封了 IP 蜜罐就没用"是多余的——封禁按 IP，新 IP 照样进来触发记录。
 
 > 验收：`sh scripts/vps-check.sh gate`

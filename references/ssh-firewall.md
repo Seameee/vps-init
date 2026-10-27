@@ -238,7 +238,7 @@ chain ufw-before-input {
 
 ### 坑 3：从远端探测端口"开不开"经常不可信
 
-从部署机用 `bash /dev/tcp/host/80` 和 `curl telnet://host:80` 探测，**连接任意端口都显示"成功/开放"，包括根本不存在的 1337、9999、65000**——路径上有透明代理时 `time_connect` 恒为 0.001s。**这种探测结论是假的，不要采信。**
+从部署机用 `bash /dev/tcp/host/80`、`curl telnet://host:80` 探测，**连接任意端口都显示"成功/开放"，包括根本不存在的 1337、9999、65000**——路径上有透明代理时 `time_connect` 恒为 0.001s。**这种探测结论是假的，不要采信。**
 
 **方法 A：看链的默认策略与计数器**（服务器侧，最可靠）
 
@@ -259,19 +259,8 @@ chain ufw-user-input {
 type filter hook input priority filter; policy drop;     # ← 默认拒绝
 ```
 
-**方法 B：服务器本地自测**
-
-```bash
-timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/22222' && echo 应可达
-timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/80'    || echo 应不可达
-```
-
-**方法 C：真正的端到端**
-
-```bash
-ssh -p 22222 user@host 'echo ok'   # 放行的端口能登录
-curl -m 5 http://host/             # 未放行端口应明确失败（timeout / refused）
-```
+**方法 B：服务器本地自测**：`timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/22222' && echo 应可达`；把端口换成未放行的（如 80）应不可达。
+**方法 C：真正的端到端**：`ssh -p 22222 user@host 'echo ok'` 能登录；`curl -m 5 http://host/` 必须明确失败（timeout / refused）。
 
 > **关键验证**：`nft list table ip filter` 必须出现 `policy drop`，且 `nft list chain ip filter ufw-user-input` 里的 dport 必须等于**真实 SSH 端口**（改端口后忘了更新防火墙，是"放行了却连不上"的头号原因）。
 

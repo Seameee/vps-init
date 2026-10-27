@@ -16,7 +16,7 @@
 
 ## 1. nexttrace（路由追踪）
 
-- **用途**：排障看真实路由、AS 归属、地区。**开销**：无常驻进程，按需运行。**版本**：`NextTrace v1.7.3 (2026-08-23)`。
+- **用途**：排障看真实路由 / AS 归属 / 地区。**开销**：无常驻进程。**版本**：`NextTrace v1.7.3 (2026-08-23)`。
 - ⚠️ 官方 README 的 URL 容易抄错。**key 和仓库 URI 都在 `releases/latest/download/` 下**，不是 `nxtrace.github.io`。
 
 ```bash
@@ -55,8 +55,7 @@ apt-get remove -y nexttrace   # 回滚；另可删 nexttrace.sources 与 keyring
 ## 2. BBRv3-lite（拥塞控制与 TCP 调优）
 
 - **版本**：`bbrv3-lite v8.0.7`。脚本 <https://raw.githubusercontent.com/ike-sh/bbrv3-lite/main/install-alias.sh> 把上游 `net-tcp-tune.sh` 装成 `/usr/local/bin/bbr`（**带 SHA256 校验**）。安装后是 **726KB 的 Bash 脚本**（约 14000+ 行，不是二进制、也不是内核模块）。
-
-> ⚠️ **不要以为它"只调 sysctl"**。`bbr kernel install` 会真的换内核。
+- ⚠️ **不要以为它"只调 sysctl"**。`bbr kernel install` 会真的换内核。
 
 ```bash
 bbr kernel status                 # 只读：当前内核 / 架构 / x86-64 level / BBR 兼容性
@@ -65,14 +64,11 @@ bbr kernel install --track main   # XanMod Main（更新更快）
 bbr kernel remove                 # 卸载【非运行中】的 XanMod 内核包
 ```
 
-- **前置拦截**：非 Debian/Ubuntu、非 `x86_64`（ARM64 提示用发行版内核）、**容器内**、**Secure Boot 已启用** —— 四种都拒绝。
-- **会做**：装 ca-certificates/curl/gnupg → 下载 `dl.xanmod.org/archive.key` 并 `gpg --show-keys` 校验 → dearmor → 写 `xanmod-release.list`（用你的 `VERSION_CODENAME` 拼地址）→ `apt-get update` → 装内核包 → `update-grub`。
-- **按 CPU 能力选包**：用 `/proc/cpuinfo` flags 判定 x86-64 级别；v3 要求 `bmi`/`bmi1` **任一**、`abm`/`lzcnt` **任一**。LTS：v3→`linux-xanmod-lts-x64v3`（回退 v2/v1）；Main：v3→`linux-xanmod-x64v3`。源码有防呆：**Main 轨绝不降级用 LTS 包**。
-- **卸载安全**：`kernel remove` **跳过正在运行的内核包**，装完明确提示"当前内核未被删除"。
+**`kernel install` 实现要点**（读源码确认）：**前置拦截** 非 Debian/Ubuntu、非 `x86_64`（ARM64 提示用发行版内核）、**容器内**、**Secure Boot 已启用** —— 四种都拒绝。**会做**：装 ca-certificates/curl/gnupg → 下载 `dl.xanmod.org/archive.key` 并 `gpg --show-keys` 校验 → dearmor → 写 `xanmod-release.list`（用你的 `VERSION_CODENAME` 拼地址）→ `apt-get update` → 装内核包 → `update-grub`。**按 CPU 能力选包**：用 `/proc/cpuinfo` flags 判定 x86-64 级别；v3 要求 `bmi`/`bmi1` **任一**、`abm`/`lzcnt` **任一**。LTS：v3→`linux-xanmod-lts-x64v3`（回退 v2/v1）；Main：v3→`linux-xanmod-x64v3`。源码有防呆：**Main 轨绝不降级用 LTS 包**。**卸载安全**：`kernel remove` **跳过正在运行的内核包**，装完明确提示"当前内核未被删除"。
 
 > ⚠️ `bbr kernel status` 的 "BBR generation: unknown (BBR active; not proof of BBRv3)" **不是"没装 BBRv3 内核"**，而是"**运行时 API 无法证明内核里的 BBR 是 v3 还是 v1**"。若内核名含 `xanmod`，它会打印 `v3 expected (XanMod default; runtime API cannot prove generation)`。
 
-**装 XanMod 内核的额外风险**：① 它会改 APT 源并装新内核，XanMod 源不在默认 `Origins-Pattern` 里（见 `hardening.md` §2）；② **必须重启才生效**，新内核起不来要靠引导菜单选回旧内核（脚本不删旧内核，这是对的）；③ **建议先快照**——换内核是最可能导致机器无法启动的操作，`/boot` 需留足空间；④ 只想调 TCP 参数：**只跑 `bbr install`，别碰 `bbr kernel install`**。
+**装 XanMod 内核的额外风险**：① 会改 APT 源并装新内核，XanMod 源不在默认 `Origins-Pattern` 里（见 `hardening.md` §2）；② **必须重启才生效**，新内核起不来要靠引导菜单选回旧内核（脚本不删旧内核，这是对的）；③ **建议先快照**——换内核是最可能导致机器无法启动的操作，`/boot` 需留足空间；④ 只想调 TCP 参数：**只跑 `bbr install`，别碰 `bbr kernel install`**。
 
 ### 安全流程（先预演再应用）
 
@@ -101,7 +97,7 @@ net.core.somaxconn = 4096
 net.ipv4.tcp_max_syn_backlog = 4096
 ```
 
-并且**明确声明不碰**：`tcp_mem`、`tcp_adv_win_scale`、TIME_WAIT、VM、文件限制、IRQ 亲和性、NIC offloads、RPS/RFS。**它不会像某些"优化脚本"那样把 `vm.swappiness`、`fs.file-max` 乱改一气。**
+**明确声明不碰**：`tcp_mem`、`tcp_adv_win_scale`、TIME_WAIT、VM、文件限制、IRQ 亲和性、NIC offloads、RPS/RFS。**不会像某些"优化脚本"那样把 `vm.swappiness`、`fs.file-max` 乱改一气。**
 
 | 它创建的路径（回滚依据） | 作用 |
 |---|---|
@@ -149,7 +145,7 @@ bash /tmp/linuxmirrors.sh --abroad --backup true --upgrade-software false --clea
 | `--lang zh` | 中文输出 |
 
 - 换源后 `URIs` 变为 `http://mirrors.xtom.hk/debian/`，`apt-get update` 退出码 0；下载实测 `hello` 包 53.2 kB / 1s（82.1 kB/s）。
-- ⚠️ **脚本内部会执行 `apt update`，可能超过 4 分钟**。自动化里要给足超时或放后台。**超时被中断时务必重新确认源文件状态**（可能停在半改状态）——不要假设"超时=没改"。
+- ⚠️ **脚本内部会执行 `apt update`，可能超过 4 分钟**。要给足超时或放后台。**超时被中断时务必重新确认源文件状态**（可能停在半改状态）——不要假设"超时=没改"。
 
 ```bash
 cp /etc/apt/sources.list.d/debian.sources.bak /etc/apt/sources.list.d/debian.sources && apt-get update
@@ -282,26 +278,11 @@ rfw --xdp-mode skb --iface eth0 --allow-only-countries US,JP,KR --block-http   #
 
 > 参考 <https://gfw.report/publications/usenixsecurity23/>。
 
-### 验证：拦截生效 + GeoIP 真的加载了
+### 验证：两件事必须都验证
 
-可复现对照实验：① 起 `python3 -m http.server 8899 --bind 0.0.0.0`；② `ufw allow 8899/tcp`，从外部确认 **HTTP=200**；③ 启动 `rfw --xdp-mode skb --iface eth0 --block-http`（不带 `--countries`）；④ 从外部再访问。
+**① 拦截确实生效**。对照实验：起 `python3 -m http.server 8899 --bind 0.0.0.0` → `ufw allow 8899/tcp` → 外部确认 HTTP=200 → 启动 `rfw --xdp-mode skb --iface eth0 --block-http`（不带 `--countries`）→ 外部再访问。结果：HTTP **000 / 三次 10s 超时（被拦）**，同一机器 `ssh -p 22222` **正常返回 `SSH-2.0-OpenSSH_10.0p2`**，管理 SSH 全程未断 → 按**协议特征**精确拦截，不粗暴封端口。**必须同时验证"该拦的拦住了"和"不该拦的没被误伤"。**
 
-| 目标 | 结果 |
-|---|---|
-| `http://<server>:8899/`（HTTP） | **HTTP=000，三次全部 10s 超时（被拦）** |
-| `ssh -p 22222 <server>`（非 HTTP） | **正常返回 `SSH-2.0-OpenSSH_10.0p2`** |
-| 管理 SSH 通道（测试全程） | **未断** |
-
-→ rfw 按**协议特征**精确拦截，不粗暴封端口，不影响其他协议。**标准验收方法**：必须同时验证"该拦的拦住了"和"不该拦的没被误伤"。
-
-`--countries CN` 若 GeoIP 数据没加载就是**空转**——服务看着在跑，实际不拦任何东西：
-
-| 问题 | 结论 | 依据 |
-|---|---|---|
-| 是 MaxMind `.mmdb` 吗？ | **不是**。`MaxMind.com` 在二进制里出现 **0 次**，磁盘无 `.mmdb` | `grep -aoc 'MaxMind.com' /usr/local/bin/rfw` → 0 |
-| 怎么匹配国家？ | **LPM trie 前缀树**（`GEOIP_MAP`、`is_geoip_match`、`in_geoip_list`） | 二进制字符串 + `bpftool` |
-| 数据从哪来？ | **每次启动运行时自动下载**指定国家 IP 段（[lyc8503/sing-box-rules](https://github.com/lyc8503/sing-box-rules)），**不落盘**，直灌 BPF map | 上游 README |
-| 支持 IPv6 吗？ | 🔴 **不支持，仅 IPv4** | 上游 README |
+**② GeoIP 数据真的加载了**。`--countries CN` 若 GeoIP 没加载就是**空转**（服务在跑，实际不拦任何东西）。它不是 MaxMind `.mmdb`（`MaxMind.com` 在二进制里出现 **0 次**，磁盘无 `.mmdb`），而是 **LPM trie 前缀树**（`GEOIP_MAP`、`is_geoip_match`、`in_geoip_list`），数据**每次启动时运行时自动下载**指定国家 IP 段（[lyc8503/sing-box-rules](https://github.com/lyc8503/sing-box-rules)），**不落盘**，直灌 BPF map。🔴 **仅支持 IPv4**。
 
 ```bash
 apt-get install -y --no-install-recommends bpftool     # 约 1 MB、无常驻进程
@@ -314,13 +295,13 @@ ip link show eth0 | grep -o 'xdp[a-z]*'   # 3) XDP 是否真挂在网卡上
 #   xdpgeneric        ← skb 模式
 ```
 
-实测环境：`v0.1.9`（static-pie）、Debian 13、KVM、virtio_net、MTU 1500、`--xdp-mode skb`、常驻内存 ~13.6 MB、启动即成功（无重启循环）。
+实测环境：`v0.1.9`（static-pie）、Debian 13、KVM、virtio_net、MTU 1500、`--xdp-mode skb`、常驻内存 ~13.6 MB。
 
-> ⚠️ **rfw 开机依赖 GitHub 可达**（GeoIP 每次运行自动下载）。unit 用 `Restart=always` 会重试，但**重启后应复查 `bpftool map dump name GEOIP_MAP | grep -c key` 是否非 0**。
+> ⚠️ **rfw 开机依赖 GitHub 可达**（GeoIP 每次运行自动下载）。**重启后应复查 `bpftool map dump name GEOIP_MAP | grep -c key` 是否非 0**。
 
 ### 性能特征与层次关系
 
-- XDP 在网卡驱动层处理，零拷贝，README 称可处理 10Gbps+；GeoIP 查询 **O(1)**。协议检测**只在启用对应规则时**才有开销；`--log-port-access` 关闭时统计不产生开销。`--xdp-mode skb` 性能低于 `drv`/`hw`：网卡支持就先试 `auto`，失败再退 `skb`。
+XDP 在网卡驱动层处理、零拷贝，README 称可处理 10Gbps+；GeoIP 查询 **O(1)**。协议检测**只在启用对应规则时**才有开销。`--xdp-mode skb` 性能低于 `drv`/`hw`：网卡支持就先试 `auto`，失败再退 `skb`。
 
 | 组件 | 层次 | 职责 |
 |---|---|---|
@@ -332,6 +313,8 @@ ip link show eth0 | grep -o 'xdp[a-z]*'   # 3) XDP 是否真挂在网卡上
 
 ### Alpine 上的 rfw 要点
 
+安装同上面 §5「安装（含哈希校验）」，只把资产换成 musl 版（Alpine 上必须用 musl 构建，见 `alpine.md` §6）：
+
 ```bash
 wget -O rfw "https://github.com/narwhal-cloud/rfw/releases/download/v0.1.9/rfw-x86_64-unknown-linux-musl"
 install -m 755 rfw /usr/local/bin/rfw
@@ -341,7 +324,7 @@ rfw --iface eth0 --countries CN --block-http --block-socks5 --block-wireguard
 apk add --no-cache bpftool && bpftool net show  # 权威验证：应看到 "eth0(2) driver id N"
 ```
 
-> MTU 1500 时 `--xdp-mode auto` 可用（MTU 9000 仍需 `skb`）。`--block-all-from CN` 会警告 "未启用任何规则"（GeoIP 数据缺失），但 `--countries CN --block-XXX` 组合可正常工作。
+> MTU 1500 时 `--xdp-mode auto` 可用（MTU 9000 仍需 `skb`）。`--block-all-from CN` 会警告 "未启用任何规则"（GeoIP 数据缺失），但 `--countries CN --block-XXX` 组合正常工作。Alpine 无 systemd，用 OpenRC 单元代替上面的 `rfw.service`。
 
 ```bash
 systemctl disable --now rfw                     # 回滚
@@ -349,7 +332,7 @@ umount /sys/fs/bpf 2>/dev/null && mount -t bpf bpf /sys/fs/bpf   # 清 pin 残�
 # rm /usr/local/bin/rfw   （按需）
 ```
 
-> 未验证项：真实 CN 来源流量的端到端 GeoIP 拦截（已用 `bpftool` 证明 6163 条 CN 前缀已入 map，即"数据已加载、规则会命中"，缺的只是从 CN 侧打一发）；`--block-fet-*`/`--block-quic` 的实际命中；吞吐/延迟基准。
+> 未验证项：从 CN 侧的真实来源流量端到端 GeoIP 拦截（已用 `bpftool` 证明 6163 条 CN 前缀入 map，即"数据已加载、规则会命中"）；`--block-fet-*`/`--block-quic` 的实际命中。
 
 ## 6. SSH 蜜罐（sshesame / endlessh）
 
@@ -466,11 +449,7 @@ ss -tlnp | grep 2222 || echo "2222 已释放"
 
 这是一个你并不想要、也不会出现在计划里的**额外对外开放端口**。装 `sshesame` **不会**自动启动（它连单元都没有），但 `endlessh` 会。**任何 `apt install` 之后都要复查 `ss -tlnp`**——这是"我明明没开这个端口"类问题的常见来源。
 
-**endlessh（若确实要用）**：包**带** `/usr/lib/systemd/system/endlessh.service`，但**不带** `/etc/endlessh/config`。端口由 `ConfigurationDirectory=endlessh`（`/etc/endlessh/`）下的 config 决定，无 config 时用内置默认 **2222**。单元里 `PrivateUsers=true` 且 `AmbientCapabilities=CAP_NET_BIND_SERVICE` **被注释掉**，所以直接跑**绑不了 22**；要绑特权端口需取消注释 `AmbientCapabilities`、注释 `PrivateUsers`。
-
-```bash
-systemctl cat endlessh | grep -B2 -A2 -i 'AmbientCapabilities\|PrivateUsers'
-```
+**endlessh（若确实要用）**：包**带** `/usr/lib/systemd/system/endlessh.service`，但**不带** `/etc/endlessh/config`。端口由 `ConfigurationDirectory=endlessh`（`/etc/endlessh/`）下的 config 决定，无 config 时用内置默认 **2222**。单元里 `PrivateUsers=true` 且 `AmbientCapabilities=CAP_NET_BIND_SERVICE` **被注释掉**，所以直接跑**绑不了 22**；要绑特权端口需取消注释 `AmbientCapabilities`、注释 `PrivateUsers`（`systemctl cat endlessh | grep -B2 -A2 -i 'AmbientCapabilities\|PrivateUsers'`）。
 
 > **只想二选一时选 sshesame**。endlessh 优势是拖时间，但部署更绕、还会自动占端口。
 

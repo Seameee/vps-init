@@ -174,8 +174,7 @@ System clock synchronized: no
        NTP service: active
 ```
 
-`journalctl -u systemd-timesyncd` 里全是 `Timed out waiting for reply from ...:123`（Google / pool / 阿里 / 腾讯 / IPv6 目标**全部超时**），
-而同一台机器 **UDP/53 正常、TCP/443 正常** → 是**机房层对 UDP 123 的封锁**，不是本机配置问题。
+`journalctl -u systemd-timesyncd` 里全是 `Timed out waiting for reply from ...:123`（Google / pool / 阿里 / 腾讯 / IPv6 目标**全部超时**），而同一台机器 **UDP/53 正常、TCP/443 正常** → 是**机房层对 UDP 123 的封锁**，不是本机配置问题。
 
 **别急着换 chrony**（一样走 UDP/123，换了不会好），也别急着改 `NTP=` 服务器列表。先确诊：
 

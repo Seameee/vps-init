@@ -10,8 +10,7 @@
 | 3 | **jail.d 的 `journalmatch` 覆盖了 filter 的正确值** | OpenSSH 10 进程名变成 `sshd-session`，jail 读不到任何日志 |
 
 ## 1. 坑 3（最隐蔽）：`defaults-debian.conf` 让 fail2ban 读不到 SSH 日志
-现象：制造 5 次真实失败登录后 `fail2ban-client status sshd` 仍是 `Currently failed: 0` / `Total failed: 0`。
-根因：Debian 13 的 OpenSSH 是 **10.0p2**，SSH 会话进程改名成 **`sshd-session`**（监听进程仍是 `sshd`）：
+现象：制造 5 次真实失败登录后 `fail2ban-client status sshd` 仍是 `Currently failed: 0` / `Total failed: 0`。根因：Debian 13 的 OpenSSH 是 **10.0p2**，SSH 会话进程改名成 **`sshd-session`**（监听进程仍是 `sshd`）：
 ```
 _SYSTEMD_UNIT = ssh.service
 _COMM         = sshd-session      # ← OpenSSH 10 的新名字

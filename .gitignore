@@ -1,0 +1,5 @@
+# 依赖与产物，不必入库
+.DS_Store
+*.swp
+*.tmp
+/tmp/

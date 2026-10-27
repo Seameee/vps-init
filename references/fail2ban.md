@@ -14,7 +14,6 @@
 
 现象：制造 5 次真实失败登录后 `fail2ban-client status sshd` 仍是 `Currently failed: 0` / `Total failed: 0`。
 根因：Debian 13 的 OpenSSH 是 **10.0p2**，SSH 会话进程改名成 **`sshd-session`**（监听进程仍是 `sshd`）：
-
 ```
 _SYSTEMD_UNIT = ssh.service
 _COMM         = sshd-session      # ← OpenSSH 10 的新名字
@@ -22,7 +21,6 @@ SYSLOG_IDENTIFIER = sshd-session
 ```
 
 filter 已知此事（`/etc/fail2ban/filter.d/sshd.conf` 第 129 行）：
-
 ```ini
 journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd + _COMM=sshd-session
 ```
@@ -52,7 +50,6 @@ bantime   = 1h
 findtime  = 10m
 maxretry  = 3
 banaction = nftables
-
 [sshd]
 enabled  = true
 port     = 22222
@@ -60,7 +57,6 @@ mode     = aggressive
 maxretry = 3
 # 显式写全，修正 Debian 默认值漏掉 sshd-session 的问题
 journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd + _COMM=sshd-session
-
 [recidive]
 enabled   = true
 backend   = auto
@@ -96,7 +92,6 @@ grep -iE "Ignore|Ban|Found" /var/log/fail2ban.log | tail
 ## 2. 坑 1：默认 banaction 是 nftables，但 nftables 包不装
 
 `defaults-debian.conf` 自带 `banaction = nftables`，但 **fail2ban 包并不依赖 `nftables` 包**：
-
 ```
 fail2ban-client set sshd banip 203.0.113.66
 → 1                                    # ← 返回成功！
@@ -107,7 +102,6 @@ nft list ruleset
 ```
 
 只有日志说实话：
-
 ```
 fail2ban.actions NOTICE [sshd] Ban 203.0.113.66
 fail2ban.utils  ERROR  ... stderr: '/bin/sh: 1: nft: not found'
@@ -118,7 +112,6 @@ fail2ban.actions ERROR  Failed to execute ban jail 'sshd' action 'nftables' ... 
 ```bash
 apt-get install -y nftables
 systemctl restart fail2ban        # 必须重启，reload 不足以让 action 重建
-
 # 装好后实测（务必用 TEST-NET 保留地址，避免误封真人）
 fail2ban-client set sshd banip 203.0.113.66
 nft list ruleset | grep 203.0.113.66     # 必须能看到
@@ -126,7 +119,6 @@ fail2ban-client set sshd unbanip 203.0.113.66   # 清理
 ```
 
 成功后的规则形态：
-
 ```
 table inet f2b-table {
 	set addr-set-sshd { type ipv4_addr; elements = { 203.0.113.66 } }
@@ -151,11 +143,9 @@ nftables action 把端口**烘进规则文本**，该文本在 action 启动时�
 ## 4. 🔴 上锁前必读：`f2b-guard` 守卫
 
 蜜罐 jail 用 `action = nftables[type=allports]`。为验证封禁逻辑**临时把管理 IP 从 `ignoreip` 移除**，单次蜜罐尝试后就：
-
 ```
 NOTICE [honeypot-ssh] Found <你的管理IP>
 NOTICE [honeypot-ssh] Ban <你的管理IP>
-
 $ ssh -p 22222 root@<host>
 Connection closed by <host> port 22222        ← 彻底进不去
 ```
@@ -166,7 +156,6 @@ Connection closed by <host> port 22222        ← 彻底进不去
 
 ```bash
 ignoreip = 127.0.0.1/8 ::1 <你的管理IP> <跳板机IP>
-
 for j in sshd honeypot-ssh recidive; do      # 改完立即复核三个 jail 的生效值
   fail2ban-client get $j ignoreip
 done
@@ -191,7 +180,6 @@ printf '%s\n' '<跳板机IP>' '<其他管理IP>' > /etc/fail2ban/guard-ips
 > 设计理由：**管理 IP 会变**（换网络、换跳板、多人运维），硬编码进脚本会立刻失效；自动取当前连接 IP 则永远跟随实际。
 
 实测守卫行为（Debian 13，全程无硬编码）：
-
 ```
 $ f2b-guard check      # ✅ ignoreip 守卫通过（/etc/fail2ban/jail.d/zz-vps-init.conf）
                        #    ignoreip: ... <你的管理IP> <跳板机IP>；已校验 IP: <当前连接IP>   → 0
@@ -210,7 +198,6 @@ $ f2b-guard restart    # ⛔ 守卫拦截：未重启 fail2ban（避免把自己
 绝对不要做：① 为测试移除 `ignoreip` 里的管理 IP（**唯一**把你锁死的操作）；② 在 allports jail 上用管理 IP 做封禁测试（单次命中即失联）；③ 假设"等它过期"可行（`recidive` 会升级成长封，默认 1 周）；④ 用 `>/dev/null` 掩盖 fail2ban 报错。
 
 安全的测试方式：
-
 ```bash
 fail2ban-regex /tmp/honeypot.log /etc/fail2ban/filter.d/sshesame.conf   # ① 离线验证 filter
 fail2ban-client set honeypot-ssh unbanip <测试IP>                      # ② 可牺牲来源 IP，测完立即解封
@@ -228,7 +215,6 @@ fail2ban-client -t                       # "OK: configuration test is successful
 systemctl restart fail2ban               # 必须 restart：坑 1 需它重建 action，坑 2 需它重建端口规则
 fail2ban-client status                   # 应列出 sshd 与 recidive
 fail2ban-client status sshd              # Journal matches / Total failed / Banned IP list
-
 nft list set inet f2b-table addr-set-sshd                  # 集合存在
 nft list chain inet f2b-table f2b-chain | grep dport       # 端口必须等于真实 SSH 端口
 fail2ban-client set sshd banip 203.0.113.66 && \
@@ -250,7 +236,6 @@ fail2ban-client set sshd unbanip 203.0.113.66
 实测（对 50 个保留测试地址逐条封禁）：ufw `ufw insert 1 deny from <IP>` 总耗时 **13.73 秒**、单个 **274.6 ms**、**54 条链上规则**（每 IP 一条）；nft set `nft add element` 总耗时 **0.21 秒**、单个 **4.3 ms**、**1 条规则** + 集合 50 个元素。**nft set 快约 64 倍**：ufw 每次封禁都是一次完整重写（重新序列化全部规则 + 写入 + 重载，Python 启动 + nft 事务），IP 越多越慢且规则线性增长（封 10000 个就是 10000 条规则）；nft set 是常数时间查找（哈希/区间），**始终只有 1 条规则**。
 
 规则形态：
-
 ```
 table inet f2b-table {
 	set addr-set-honeypot-ssh { type ipv4_addr; elements = { 73.147.19.171 } }
@@ -285,7 +270,6 @@ table inet f2b-table {
    若已误用 `flush`，`systemctl restart fail2ban` 会把数据库里的封禁重新下发到 nft。
 
 确认 banaction（若显示 `iptables-*` 老版本默认，改掉）：
-
 ```bash
 grep -rE '^[[:space:]]*banaction' /etc/fail2ban/jail.d/ /etc/fail2ban/jail.conf
 ```
@@ -335,7 +319,6 @@ CONF
 原因：fail2ban **先剥离日期前缀**，剥离后剩余文本并不从行首 `[` 开始，所以 `^\[` 永远匹配不上——**而且不报语法错误**，只是静默 0 命中。这个坑极难发现：配置看着正常、`fail2ban-client status` 不报错，但 `Total failed` 永远是 0。**唯一可靠的判断是 `fail2ban-regex` 的 matched 数 > 0。**（顺带澄清：fail2ban **支持** `(?:...)` 非捕获组，真正的问题只是行首锚定位置。）
 
 验证：
-
 ```bash
 journalctl -u sshesame --since "3 hours ago" --no-pager -o json 2>/dev/null \
  | python3 -c "
@@ -345,7 +328,6 @@ for l in sys.stdin:
     except: continue
     if re.search(r'\[\d+\.\d+\.\d+\.\d+:\d+\]', m): print(m)
 " > /tmp/only_ip.log
-
 fail2ban-regex /tmp/only_ip.log /etc/fail2ban/filter.d/sshesame.conf
 # 实测：4 matched / 29 missed（missed 的是命令噪音，符合预期）
 ```
@@ -368,7 +350,6 @@ action    = nftables[type=allports]
 ```
 
 实测结果（真的抓到了攻击者）：
-
 ```
 Status for the jail: honeypot-ssh
 |- Filter
@@ -380,7 +361,6 @@ Status for the jail: honeypot-ssh
 ```
 
 对应 nft 规则是**全端口**（无 `dport` 限定，与 sshd jail 的 `tcp dport 22222` 形成对比）：
-
 ```
 meta l4proto tcp ip saddr @addr-set-honeypot-ssh reject with icmp port-unreachable
 ```

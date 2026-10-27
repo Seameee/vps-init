@@ -50,14 +50,12 @@ apk add --no-cache fail2ban ufw nftables iptables logrotate zsh git curl wget
 ## 3. 🔴 ufw 装了但没注册 runlevel
 
 `ufw` 包会装 `/etc/init.d/ufw`，但**不会**自动加入 runlevel。更迷惑的是 `ufw --force enable` 会打印 "enabled on system startup"，**但那是 ufw 自己的 `/etc/ufw/ufw.conf` 里的 `ENABLED=yes`，与 OpenRC 的开机自启是两回事**：
-
 ```bash
 # 实测：ufw enable 之后
 $ rc-update show default | grep ufw
                                   # ← 空！重启后规则会丢
 $ rc-service ufw status
  * status: stopped                # ← 也是 stopped（规则却已在内核）
-
 # 正确做法：
 rc-update add ufw default
 rc-service ufw start             # 用 OpenRC 管理，别只依赖 ufw enable
@@ -76,7 +74,6 @@ ufw status | head -1                       # Status: active
 ```bash
 modprobe tcp_bbr
 grep tcp_bbr /proc/sys/net/ipv4/tcp_available_congestion_control || true
-
 # 1) 写 sysctl（/etc/init.d/sysctl 会读 /etc/sysctl.d/*.conf）
 cat > /etc/sysctl.d/99-vps-init.conf <<'CONF'
 net.core.default_qdisc = fq
@@ -85,10 +82,8 @@ net.ipv4.tcp_syncookies = 1
 kernel.kptr_restrict = 2
 CONF
 sysctl -p /etc/sysctl.d/99-vps-init.conf
-
 # 2) ⚠️ 关键：确保开机时 bbr 模块已载入，否则 sysctl 会回落到 cubic
 grep -q '^tcp_bbr' /etc/modules || echo 'tcp_bbr' >> /etc/modules
-
 # 3) 验证
 sysctl -n net.ipv4.tcp_congestion_control   # bbr
 sysctl -n net.core.default_qdisc            # fq
@@ -100,7 +95,6 @@ sysctl -n net.core.default_qdisc            # fq
 
 ```bash
 apk add --no-cache zsh git          # 不是 apt
-
 # ⚠️ Alpine 没有 chsh —— 直接改 /etc/passwd
 cp /etc/passwd /etc/passwd.bak-vps-init
 sed -i 's|^\(root:[^:]*:[0-9]*:[0-9]*:[^:]*:[^:]*:\).*$|\1/bin/zsh|' /etc/passwd
@@ -112,7 +106,6 @@ grep '^root:' /etc/passwd | cut -d: -f7      # 验证：/bin/zsh
 ## 6. 🔴 musl vs glibc：预编译二进制跑不起来
 
 glibc 动态链接的二进制会直接报 `not found`（极具误导性——文件明明存在、权限也对）。
-
 ```bash
 $ ldd sshesame
   /lib64/ld-linux-x86-64.so.2               # ← glibc 的 loader
@@ -165,7 +158,6 @@ backend = auto            # 不是 systemd！
 ```
 
 `/etc/fail2ban/paths.conf` 在 Alpine 上是**空的**，所以 `auto` 找不到路径时**必须显式写 `logpath`**：
-
 ```ini
 [sshd]
 logpath = /var/log/messages
@@ -190,7 +182,6 @@ Alpine 的 fail2ban 只带 iptables action 为默认（`nftables*.conf` 文件�
 ### ④ 🔴 禁密码后，内置 sshd filter 匹配不到任何东西
 
 `PasswordAuthentication no` 时 sshd **永远不会**产生 `Failed password` 行：
-
 ```
 $ fail2ban-regex /var/log/messages /etc/fail2ban/filter.d/alpine-sshd.conf
 Lines: 53 lines, 0 ignored, 0 matched, 53 missed      ← 完全失效
@@ -199,7 +190,6 @@ Lines: 53 lines, 0 ignored, 0 matched, 53 missed      ← 同样失效
 ```
 
 攻击者留下的唯一痕迹是 **`Connection closed ... [preauth]`**（端口扫描），内置 filter 不匹配它：
-
 ```ini
 # /etc/fail2ban/filter.d/vps-init-sshd.conf
 [Definition]
@@ -238,7 +228,6 @@ fail2ban-regex /var/log/sshesame.log /etc/fail2ban/filter.d/sshesame.conf      |
 
 ```sh
 #!/sbin/openrc-run
-
 name="myapp"
 description="..."
 command="/usr/local/bin/myapp"
@@ -247,12 +236,10 @@ command_background="yes"          # 后台运行（否则 OpenRC 等它退出）
 pidfile="/run/${RC_SVCNAME}.pid"
 output_log="/var/log/myapp.log"   # ⚠️ 日志去这里，不是 /var/log/messages
 error_log="/var/log/myapp.log"
-
 depend() {
 	need net
 	after firewall
 }
-
 start_pre() {
 	checkpath --directory --mode 0700 /var/lib/myapp
 	touch /var/log/myapp.log
@@ -310,7 +297,6 @@ echo /root/ssh-deadman.sh | at now + 45 minutes && atq
 ## 10. 日志轮转（Alpine）
 
 自带 `/etc/periodic/daily/logrotate`（无需 systemd timer），但 **`/var/log/messages` 默认没有轮转规则**（busybox syslogd 会无限增长）。
-
 ```bash
 cat > /etc/logrotate.d/vps-init <<'CONF'
 /var/log/messages {

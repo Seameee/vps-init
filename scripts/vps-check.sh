@@ -60,6 +60,11 @@ sshd_bin() {
   [ -n "$p" ] && readlink -f "/proc/$p/exe" 2>/dev/null
 }
 ssh_ports() { list_ports | awk '/ssh/ {print}' ; }
+# 真装了吗（`dpkg -l snapd` 对未安装的包也返回 0，不能用来判断）
+pkg_installed() {
+  [ "$(dpkg-query -W -f='${Status}' "$1" 2>/dev/null)" = "install ok installed" ]
+}
+snapd_installed() { pkg_installed snapd; }
 f2b_jails() {
   fail2ban-client status 2>/dev/null | sed -n 's/.*Jail list:[[:space:]]*//p' | tr -d ' ' | tr ',' ' '
 }
@@ -146,7 +151,9 @@ recon() {
   hr "4. 真实监听端口"
   list_ports | sed 's/^/  /'
 
-  if [ "$IS_ALPINE" = no ] && { have snap || [ -e /snap ] || dpkg -l snapd >/dev/null 2>&1; }; then
+  # ⚠️ `dpkg -l snapd` 即使未安装也返回 0（只表示"匹配到了这个包名"，状态是 un），
+  # 必须看 Status 字段，否则每台 Debian 都会误报"有 snap"。
+  if [ "$IS_ALPINE" = no ] && { have snap || [ -e /snap ] || snapd_installed; }; then
     hr "4b. snap（Ubuntu 建议卸载，见 hardening.md §9）"
     echo "  snapd: $(dpkg-query -W -f='${Version}' snapd 2>/dev/null || echo '未装')"
     echo "  已装 snap 包数（非 0 需先迁移）: $(snap list 2>/dev/null | tail -n +2 | wc -l)"

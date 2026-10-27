@@ -52,7 +52,6 @@ CONF
 ```
 
 验证配置真能跑（干跑不要加 `--debug`，输出极长且容易被管道 SIGPIPE 中断）：
-
 ```bash
 timeout 90 unattended-upgrade --dry-run > /tmp/uu.log 2>&1; echo $?
 grep -iE 'error|traceback' /tmp/uu.log      # 期望无输出
@@ -63,7 +62,6 @@ timeout 100 unattended-upgrade --dry-run --verbose 2>&1 | grep -i "Allowed origi
 ### ⚠️ 键名发行版相关：Debian 13 用 `Origins-Pattern`，**不是** `Allowed-Origins`
 
 大量教程教你改 `Unattended-Upgrade::Allowed-Origins`。**Debian 13 的 `/etc/apt/apt.conf.d/50unattended-upgrades` 里根本没有这个键**（全文件 165 行、132 行注释，只有 `Origins-Pattern` 和 `Package-Blacklist`）。改一个不存在的键 = 白改，且不报错。而 **Ubuntu 26.04 用的正是 `Allowed-Origins`**——动手前先确认：
-
 ```bash
 grep -nE 'Origins-Pattern|Allowed-Origins' /etc/apt/apt.conf.d/50unattended-upgrades
 ```
@@ -81,7 +79,6 @@ Unattended-Upgrade::Origins-Pattern {
 ```
 
 实测生效值：
-
 ```
 Allowed origins are: origin=Debian,codename=trixie,label=Debian,
                      origin=Debian,codename=trixie,label=Debian-Security,
@@ -171,7 +168,6 @@ sysctl -n net.core.default_qdisc             # fq
 ## 5. 时间同步（chrony vs systemd-timesyncd）
 
 默认 `systemd-timesyncd` 已能满足基本 NTP 需求，**不必盲目换 chrony**。需要更精确/更稳定（跑数据库、证书签发）再换：
-
 ```bash
 apt-get install -y chrony
 systemctl disable --now systemd-timesyncd     # 二者不能共存
@@ -209,7 +205,6 @@ needrestart -b          # 机器可读输出，便于 agent 解析
 ## 8. sudo 日志（🔴 先确认用的是 sudo 还是 sudo-rs）
 
 Ubuntu 26.04 用的是 **`sudo-rs`**（Rust 重写版，`sudo -V` 显示 `sudo-rs 0.2.13-0ubuntu1.2`），向 `/etc/sudoers.d/` 写入 `logfile` / `log_input` / `iolog_dir` 后 `visudo -c` 报：
-
 ```
 /etc/sudoers.d/99-vps-init-log:1:10: syntax error: unknown setting: 'logfile'
 /etc/sudoers.d/99-vps-init-log:2:10: syntax error: unknown setting: 'log_input'
@@ -227,10 +222,8 @@ journalctl --since "1 minute ago" | grep sudo
 ```
 
 所以 Ubuntu 上**跳过这一节的配置**即可。传统 sudo（Debian 等）的写法：
-
 ```bash
 sudo -V | head -1        # "Sudo version x.y" = 传统；"sudo-rs ..." = Rust 版
-
 # 仅传统 sudo 使用以下配置：
 cat > /etc/sudoers.d/99-vps-init-log <<'CONF'
 Defaults logfile="/var/log/sudo.log"
@@ -247,7 +240,6 @@ visudo -c                    # 必须校验，写错文件会锁死 sudo
 ## 9. 卸载 snap（Ubuntu 默认必做）
 
 Ubuntu Server 默认装 `snapd`，即使**一个 snap 包都没装**也会带来：常驻 `snapd` 服务、`/snap` 挂载机制、自动刷新（`snapd.refresh.timer`）后台占用，以及把 `firefox`/`chromium-browser` 这类包的 apt 候选**偷换成 snap 跳板包**（`1snap1-0ubuntu9.1` 这种版本号）。服务器上属于纯负担。
-
 ```bash
 command -v snap                                  # 是否装了
 snap list                                        # ⚠️ 有输出就说明有依赖，先迁走再卸
@@ -261,10 +253,8 @@ apt-cache rdepends --installed snapd             # 谁依赖它
 
 ```bash
 export DEBIAN_FRONTEND=noninteractive
-
 # 1) 卸载主体（--purge 连配置一起）
 apt-get purge -y snapd
-
 # 2) 阻止 apt 通过 Recommends/Suggests 把它装回来（关键，否则迟早回来）
 install -d -m 755 /etc/apt/preferences.d
 cat > /etc/apt/preferences.d/nosnap.pref <<'CONF'
@@ -273,7 +263,6 @@ Package: snapd
 Pin: release a=*
 Pin-Priority: -10
 CONF
-
 # 3) 清理 PATH 与钩子残留（apt purge 不做这些！）
 sed -i 's|:/snap/bin||' /etc/environment                    # 登录 PATH
 sed -i 's|:/snap/bin||' /etc/sudoers                        # sudo secure_path ← 最容易漏
@@ -286,7 +275,6 @@ if [ -z "$XDG_DATA_DIRS" ]; then
     export XDG_DATA_DIRS="/usr/local/share:/usr/share"
 fi
 SH
-
 # 4) 验证（改过 sudoers 必须 visudo）
 visudo -c
 ```

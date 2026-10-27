@@ -19,7 +19,6 @@
 ## 2. SSH 登不上了
 
 按可能性从高到低排查（需要控制台或救援模式）：
-
 ```bash
 systemctl status ssh                                          # a) sshd 是否在跑
 /usr/sbin/sshd -t                                             # b) 配置语法
@@ -118,16 +117,12 @@ systemd-analyze verify /etc/systemd/system/<svc>.service
 ## 7. 回滚加固配置（正常情况）
 
 本 skill 的加固都写成**独立的新增文件**，所以回滚 = 删掉/停用这些文件：
-
 ```bash
 rm /etc/ssh/sshd_config.d/00-hardening.conf          # SSH 加固
 /usr/sbin/sshd -t && systemctl reload ssh
-
 ufw disable                                          # 防火墙（或 ufw reset 清空所有规则）
-
 systemctl disable --now fail2ban                     # fail2ban
 # 或只停用某个 jail：在 jail.d 里设 enabled = false 后 restart
-
 rm /etc/sysctl.d/99-vps-init.conf /etc/systemd/journald.conf.d/99-vps-init.conf   # sysctl / journald
 rm /etc/sudoers.d/99-vps-init-log                                                # sudo 日志
 sysctl --system && systemctl restart systemd-journald

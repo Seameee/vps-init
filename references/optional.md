@@ -4,15 +4,7 @@
 >
 > **默认不装。** 仅在用户明确需要、且机器资源允许时才装。每项记录：版本、改了什么、如何验证、如何回滚。
 
-| # | 组件 | 层级 |
-|---|---|---|
-| 1 | nexttrace（路由追踪） | Tier 1 |
-| 2 | BBRv3-lite（TCP 调优 / XanMod 内核） | Tier 2 |
-| 3 | LinuxMirrors 换源 | 可选 |
-| 4 | surge / vless-server 代理节点 | Tier 2 |
-| 5 | rfw（eBPF/XDP 防火墙） | Tier 2 |
-| 6 | SSH 蜜罐（sshesame / endlessh） | Tier 2 |
-| 7 | 资源开销参考表 | — |
+层级：**nexttrace = Tier 1**；**BBRv3-lite / 代理节点 / rfw / 蜜罐 = Tier 2**；换源与资源开销表按需参考。
 
 ## 1. nexttrace（路由追踪）
 
@@ -23,14 +15,12 @@
 install -d -m 755 /etc/apt/keyrings
 curl -fsSL https://github.com/nxtrace/nexttrace-debs/releases/latest/download/nexttrace-archive-keyring.gpg \
   -o /etc/apt/keyrings/nexttrace.gpg
-
 cat > /etc/apt/sources.list.d/nexttrace.sources <<'CONF'
 Types: deb
 URIs: https://github.com/nxtrace/nexttrace-debs/releases/latest/download/
 Suites: ./
 Signed-By: /etc/apt/keyrings/nexttrace.gpg
 CONF
-
 apt-get update
 apt-get install -y nexttrace          # 完整版；nexttrace-tiny 仅 traceroute；ntr 为 MTR 专用
 nexttrace --version
@@ -38,7 +28,6 @@ nexttrace -n -q 1 1.1.1.1
 ```
 
 实测输出（东京 → Cloudflare，6 跳到达）：
-
 ```
 3  154.54.5.238  AS174  [COGENT-BONE]  日本 东京都 东京  cogentco.com   3.59 ms
 5  103.22.201.83 AS13335 [CLOUDFLARE-AP] 日本 东京都 东京 cloudflare.com  16.95 ms
@@ -48,9 +37,7 @@ Trace Stopped: Destination Reached at Hop 6
 
 **注意**：输出带 ANSI 颜色码，脚本解析时加 `-n`（不做 DNS 反解）或自行 strip 转义。
 
-```bash
-apt-get remove -y nexttrace   # 回滚；另可删 nexttrace.sources 与 keyrings/nexttrace.gpg
-```
+回滚：`apt-get remove -y nexttrace`，另可删 `nexttrace.sources` 与 `keyrings/nexttrace.gpg`。
 
 ## 2. BBRv3-lite（拥塞控制与 TCP 调优）
 
@@ -76,14 +63,12 @@ bbr kernel remove                 # 卸载【非运行中】的 XanMod 内核包
 curl -fsSL -o /tmp/bbr-install.sh https://raw.githubusercontent.com/ike-sh/bbrv3-lite/main/install-alias.sh
 bash -n /tmp/bbr-install.sh
 bash /tmp/bbr-install.sh install        # 自带 SHA256 校验 -> installed: /usr/local/bin/bbr
-
 bbr status                              # 【关键】先预演，看它准备改什么
 bbr explain --profile balanced --role mixed
 bbr install --profile balanced --role mixed
 ```
 
 `bbr explain` 实测只改这 10 个 sysctl（1C/13G 机器）：
-
 ```
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
@@ -111,7 +96,6 @@ net.ipv4.tcp_max_syn_backlog = 4096
 bbr status                      # Persistent sync 应为 SYNCED
 sysctl -n net.core.rmem_max     # 16777216
 sysctl -n net.ipv4.tcp_fastopen # 3
-
 bbr restore                    # 恢复到基线（含安装时的不可覆盖基线）
 bbr uninstall --purge-state    # 彻底卸载 bbr 命令与状态
 bbr kernel remove              # 若装过 XanMod：卸载【非运行中】的包
@@ -127,10 +111,8 @@ bbr kernel remove              # 若装过 XanMod：卸载【非运行中】的�
 ```bash
 install -d -m 700 /root/apt-source-backup
 cp -a /etc/apt/sources.list.d/debian.sources /root/apt-source-backup/
-
 curl -fsSL -o /tmp/linuxmirrors.sh https://linuxmirrors.cn/main.sh
 bash -n /tmp/linuxmirrors.sh
-
 # 境外源；自动备份；先不升级不清理，便于观察
 bash /tmp/linuxmirrors.sh --abroad --backup true --upgrade-software false --clean-cache false --lang zh
 ```
@@ -147,9 +129,7 @@ bash /tmp/linuxmirrors.sh --abroad --backup true --upgrade-software false --clea
 - 换源后 `URIs` 变为 `http://mirrors.xtom.hk/debian/`，`apt-get update` 退出码 0；下载实测 `hello` 包 53.2 kB / 1s（82.1 kB/s）。
 - ⚠️ **脚本内部会执行 `apt update`，可能超过 4 分钟**。要给足超时或放后台。**超时被中断时务必重新确认源文件状态**（可能停在半改状态）——不要假设"超时=没改"。
 
-```bash
-cp /etc/apt/sources.list.d/debian.sources.bak /etc/apt/sources.list.d/debian.sources && apt-get update
-```
+回滚：`cp /etc/apt/sources.list.d/debian.sources.bak /etc/apt/sources.list.d/debian.sources && apt-get update`。
 
 ## 4. surge / vless-server 代理节点部署
 
@@ -158,9 +138,7 @@ cp /etc/apt/sources.list.d/debian.sources.bak /etc/apt/sources.list.d/debian.sou
 - 会写：`/etc/vless-reality`、`/etc/hysteria`、`/etc/naive`、`/etc/nginx`、`/etc/cloudflared`、`/etc/systemd`、`/etc/sysctl.d`、`/etc/resolv.conf`、`/etc/timezone`。
 - 自带非交互子命令：`--sync-traffic`、`--show-traffic`、`--tg-bot-poll`、`--check-expire`、`--setup-expire-cron`；无参数则进入**交互式菜单**。
 
-```bash
-bash vless-server.sh --help     # 非破坏性验证：实测退出码 0
-```
+非破坏性验证：`bash vless-server.sh --help`（实测退出码 0）。
 
 注意：① **它是交互式的**，不适合自动化盲跑（需人选协议、填域名/端口）；② **它会开代理端口**，装之前先在防火墙规划好放行端口，**别和真 SSH 端口混淆**；③ 它调用外部二进制（xray/sing-box 等核心），先确认版本来源；④ 它写 `/etc/resolv.conf`（**会先备份为 `.bak`**）与 `/etc/sysctl.d`；⑤ 1C1G 跑 Xray + Nginx + ACME 可接受，但**不要同时装多个核心**。
 
@@ -169,7 +147,6 @@ bash vless-server.sh --help     # 非破坏性验证：实测退出码 0
 ## 5. rfw（eBPF/XDP 防火墙）
 
 项目 <https://github.com/narwhal-cloud/rfw>（Rust + eBPF/XDP）。按**端口**拦不住的滥用，用按**国家方向** + **协议特征（DPI）** 的方式拦：
-
 ```bash
 rfw --countries CN,RU,KP          # GeoIP 屏蔽指定国家
 rfw --block-http --block-socks5 --block-fet-strict|loose --block-wireguard --block-quic --block-email
@@ -184,11 +161,9 @@ VER=v0.1.9
 BASE=https://github.com/narwhal-cloud/rfw/releases/download/$VER
 curl -fsSL -o rfw "$BASE/rfw-x86_64-unknown-linux-musl"
 curl -fsSL -o checksums.txt "$BASE/checksums.txt"
-
 EXP=$(awk '/rfw-x86_64-unknown-linux-musl/{print $1}' checksums.txt)
 ACT=$(sha256sum rfw | awk '{print $1}')
 [ "$EXP" = "$ACT" ] && echo "SHA256 OK" || { echo "校验失败，中止"; exit 1; }
-
 install -m 755 rfw /usr/local/bin/rfw
 rfw --version
 ```
@@ -230,7 +205,6 @@ Caused by:
 ```
 
 `/sys/fs/bpf/rfw_port_access_log` 退出后**不会被清理**，下次启动直接失败。核心功能（GeoIP + 协议拦截）**不需要** `--log-port-access`。
-
 ```bash
 umount /sys/fs/bpf && mount -t bpf bpf /sys/fs/bpf   # 清残留 pin
 ls /sys/fs/bpf/          # 应为空
@@ -244,7 +218,6 @@ cat > /etc/systemd/system/rfw.service <<'UNIT'
 Description=rfw eBPF firewall (GeoIP + protocol DPI)
 After=network-online.target
 Wants=network-online.target
-
 [Service]
 Type=simple
 # 必须显式指定 xdp-mode skb（见坑 1）
@@ -253,7 +226,6 @@ Restart=always
 RestartSec=5s
 AmbientCapabilities=CAP_BPF CAP_NET_ADMIN CAP_PERFMON
 LimitMEMLOCK=infinity
-
 [Install]
 WantedBy=multi-user.target
 UNIT
@@ -286,7 +258,6 @@ rfw --xdp-mode skb --iface eth0 --allow-only-countries US,JP,KR --block-http   #
 
 ```bash
 apt-get install -y --no-install-recommends bpftool     # 约 1 MB、无常驻进程
-
 bpftool map show | grep -i geoip          # 1) eBPF map 是否存在（名字就是 GEOIP_MAP）
 #   41: lpm_trie  name GEOIP_MAP  flags 0x1   key 8B  value 1B  max_entries 65536
 bpftool map dump name GEOIP_MAP | grep -c key   # 2) 【关键】数真灌进去多少条国家网段
@@ -314,7 +285,6 @@ XDP 在网卡驱动层处理、零拷贝，README 称可处理 10Gbps+；GeoIP �
 ### Alpine 上的 rfw 要点
 
 安装同上面 §5「安装（含哈希校验）」，只把资产换成 musl 版（Alpine 上必须用 musl 构建，见 `alpine.md` §6）：
-
 ```bash
 wget -O rfw "https://github.com/narwhal-cloud/rfw/releases/download/v0.1.9/rfw-x86_64-unknown-linux-musl"
 install -m 755 rfw /usr/local/bin/rfw
@@ -343,9 +313,7 @@ umount /sys/fs/bpf 2>/dev/null && mount -t bpf bpf /sys/fs/bpf   # 清 pin 残�
 | `sshesame` | 0.0~git20210926.d7fdb81 | 假 SSH 服务：接受任意凭据，**记录攻击者的用户名/密码/公钥指纹/命令** | ⭐ 首选 |
 | `endlessh` | 1.1-5.1 | SSH tarpit：不发完整 banner，把爆破工具挂住数小时 | 可选（见坑 3） |
 
-```bash
-apt-get install -y sshesame          # 注意：endlessh 会被自动启动，见坑 3
-```
+安装：`apt-get install -y sshesame`（⚠️ 会连带自动启动并 enable `endlessh`，见坑 3）。
 
 源码：<https://github.com/jaksi/sshesame>、<https://github.com/skeeto/endlessh>。Docker 版 `fffaraz/fakessh`（镜像 `honeok/fakessh`）在 Debian 上属于绕远路。
 
@@ -363,7 +331,6 @@ authentication for user "root" with password "root" accepted     ← 弱口令�
 ### ⚠️ 坑 1：sshesame 的配置文件是**嵌套**的
 
 Debian 打包的字段名与上游 README 不一致，顶层直接写 `listen_address` 会报 `field listen_address not found in type main.config`。正确格式（`/etc/sshesame/config.yaml`）：
-
 ```yaml
 server:
   listen_address: ":22"
@@ -387,7 +354,6 @@ Description=sshesame SSH honeypot (fake sshd on :22)
 Documentation=https://github.com/jaksi/sshesame
 After=network-online.target
 Wants=network-online.target
-
 [Service]
 Type=simple
 # 关键：显式 -data_dir，否则默认写 $HOME/.local/share，在 ProtectSystem=strict 下失败
@@ -402,7 +368,6 @@ ReadWritePaths=/var/lib/sshesame
 StandardOutput=journal
 StandardError=journal
 StandardInput=null
-
 [Install]
 WantedBy=multi-user.target
 ```
@@ -420,10 +385,8 @@ systemctl daemon-reload && systemctl enable --now sshesame
 sed 's/:22/:2200/' /etc/sshesame/config.yaml > /tmp/t.yaml
 timeout 10 /usr/bin/sshesame -config /tmp/t.yaml -data_dir /tmp/sshtest &
 ss -tlnp | grep 2200          # 必须看到监听，没看到就别继续
-
 # ② 确认 22 真的空了（真 sshd 已迁到 22222）
 ss -tlnp | grep ':22 ' || echo "22 空闲，可以部署"
-
 # ③ 建目录、写单元、启动 → ④ 验证
 systemctl is-active sshesame
 ss -tlnp | grep ':22 '        # 应为 sshesame
@@ -442,7 +405,6 @@ journalctl -u sshesame -n 20
 ```bash
 ss -tlnp | grep endlessh            # *:2222
 systemctl is-enabled endlessh       # enabled
-
 systemctl disable --now endlessh    # 只用 sshesame（推荐）就停掉它
 ss -tlnp | grep 2222 || echo "2222 已释放"
 ```
@@ -455,12 +417,7 @@ ss -tlnp | grep 2222 || echo "2222 已释放"
 
 ### 与 fail2ban 的配合：记录 + 全端口封禁
 
-| 用法 | 说明 |
-|---|---|
-| ❌ 只记录 | 攻击者可无限次尝试，你只是"看日志" |
-| ✅ 记录 + 主动封禁 | 蜜罐日志接入 fail2ban，达阈值即**全端口封禁** |
-
-要点：① **单独 jail，不要复用 `[sshd]`**（`_COMM=sshesame` vs `sshd-session`）；② `journalmatch = _SYSTEMD_UNIT=sshesame.service`；③ **`action = nftables[type=allports]`**；④ **`ignoreip` 必须含管理 IP**；⑤ **只匹配"认证"行**，否则登录后几十条命令会让 jail 反复触发、日志被 `already banned` 刷屏。完整配置与实测证据见 **`fail2ban.md` §8**。**注意 fail2ban 正则不能行首锚定到 `[`**，否则静默 0 命中。
+只记录是不够的（攻击者可无限次尝试）——必须**记录 + 达阈值全端口封禁**。要点：① **单独 jail，不要复用 `[sshd]`**（`_COMM=sshesame` vs `sshd-session`）；② `journalmatch = _SYSTEMD_UNIT=sshesame.service`；③ **`action = nftables[type=allports]`**；④ **`ignoreip` 必须含管理 IP**；⑤ **只匹配"认证"行**，否则登录后几十条命令会让 jail 反复触发、日志被 `already banned` 刷屏；⑥ **fail2ban 正则不能行首锚定到 `[`**，否则静默 0 命中。完整配置与实测证据见 **`fail2ban.md` §8**。
 
 - 蜜罐日志量大，**务必给 journald 设限额**（`SystemMaxUse=200M`，见 `hardening.md` §3）。"封了就没人进蜜罐"是多余的：封禁按 IP，新 IP 照样进来；被拒的老 IP 本身就是收益。想持续收集情报可把 `bantime` 设短（如 `1d`）。
 

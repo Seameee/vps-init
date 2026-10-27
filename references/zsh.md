@@ -21,31 +21,25 @@
 
 ```bash
 export DEBIAN_FRONTEND=noninteractive
-
 # 1) 装 zsh + git
 apt-get install -y zsh git
-
 # 2) 切换默认 shell 为 zsh
 chsh -s /usr/bin/zsh root        # 普通用户换成对应用户名
 grep '^root:' /etc/passwd | cut -d: -f7   # 验证：应显示 /usr/bin/zsh
-
 # 3) 装 oh-my-zsh（RUNZSH=no 避免安装器直接切进 zsh、打断当前会话）
 RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://install.ohmyz.sh/)"
-
 # 4) 装 .zshrc 需要的外部插件（按 .zshrc 的 plugins= 决定）
 ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
 git clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions \
     "$ZSH_CUSTOM/plugins/zsh-autosuggestions"
 git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting \
     "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting"
-
 # 5) 覆盖为用户的自定义 .zshrc（放在最后，否则会被 oh-my-zsh 模板覆盖）
 #    方式 A（推荐）：用本 skill 内置、已实机验证的配置（见 §3）
 install -m 644 "$SKILL_DIR/assets/zshrc-seameee.zshrc" "$HOME/.zshrc"
 #    方式 B：从用户的 gist 拉取
 # curl -fsSL -o "$HOME/.zshrc" \
 #     "https://gist.githubusercontent.com/<用户>/<gist-id>/raw/.zshrc"
-
 # 6) 验证
 zsh -n "$HOME/.zshrc"                       # 语法检查
 zsh -ic 'echo "plugins OK: ${#plugins[@]}"' # 交互式加载，看有无报错
@@ -88,7 +82,6 @@ grep -nE '^\s*(source|\.)\s' ~/.zshrc      # 看是否 source 了外部文件
 ```
 
 示例（上面那个 267 行的配置）：
-
 ```
 ZSH_THEME="ys"                                          ← oh-my-zsh 内置，无需下载
 plugins=(git zsh-autosuggestions zsh-syntax-highlighting z extract web-search)

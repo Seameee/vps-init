@@ -13,7 +13,6 @@ RB=$(readlink -f /proc/$SSHD_PID/exe)
 echo "$RB"                    # 例：/usr/sbin/sshd
 "$RB" -V                      # 例：OpenSSH_10.0p1
 # 之后所有检查都用 "$RB" -T，绝不用裸 sshd -T
-
 # b) 目标用户必须有可用公钥，且权限正确
 ls -l /root/.ssh/authorized_keys /home/<user>/.ssh/authorized_keys
 stat -c '%a %U:%G' /root/.ssh /root/.ssh/authorized_keys   # 期望 700 / 600 root:root
@@ -40,7 +39,6 @@ ssh-keygen -l -f /root/.ssh/authorized_keys   # 必须能打印出指纹才算�
 ```bash
 command -v at >/dev/null || apt-get install -y at
 systemctl enable --now atd
-
 # 20 分钟后把 SSH 恢复为「允许密码 + 22 端口」的保守配置
 cat > /root/ssh-deadman.sh <<'EOF'
 #!/bin/bash
@@ -80,10 +78,8 @@ atq
 # 1) 造一个模拟加固态
 printf 'PasswordAuthentication no\nPort 22222\n' > /etc/ssh/sshd_config.d/00-hardening.conf
 /usr/sbin/sshd -T | grep -E '^port|^passwordauth'   # 应为 port 22222 / no
-
 # 2) 手工触发死手脚本
 bash /root/ssh-deadman.sh
-
 # 3) 验证真的回退了（这一步不能省）
 /usr/sbin/sshd -T | grep -E '^port|^passwordauth'   # 应为 port 22 / yes
 ss -tlnp | grep -cE ':22 |:22222 '                  # 确认真实监听
@@ -95,7 +91,6 @@ ss -tlnp | grep -cE ':22 |:22222 '                  # 确认真实监听
 ## 3. 先判断 ssh 是 service 还是 socket 激活
 
 Ubuntu 24.04 起（部分 Debian 镜像也是）默认 `ssh.socket` 激活，此时 **`sshd_config` 里的 `Port` 被忽略**，端口由 socket 的 `ListenStream` 决定。
-
 ```bash
 systemctl is-active ssh.socket
 systemctl cat ssh.socket 2>/dev/null | grep -i listenstream
@@ -145,7 +140,6 @@ AllowAgentForwarding no
 Port 22
 Port 22222
 EOF
-
 # 硬验证：语法 + 生效值，都必须用运行中二进制
 "$RB" -t && echo "语法 OK" || echo "语法错误，立刻修"
 "$RB" -T | grep -Ei '^(port|passwordauthentication|permitrootlogin|maxauthtries|allowtcpforwarding)'
@@ -200,10 +194,8 @@ ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22222/tcp comment 'real SSH (hardened)'
 ufw allow 22/tcp    comment 'ssh honeypot - intentionally open'   # 蜜罐必须显式放行！
-
 # ② 检查规则
 ufw show added
-
 # ③ 启用
 ufw --force enable
 ```
@@ -219,7 +211,6 @@ ufw --force enable
 ### 为什么启用防火墙不会切断你当前的 SSH
 
 `ufw enable` 之后正在进行的 SSH 会话**没有断开**。原因在 ufw 生成的链（`nft list table ip filter`）：
-
 ```
 chain ufw-before-input {
     iifname "lo" accept
@@ -250,7 +241,6 @@ nft list chain ip filter ufw-user-input
 ```
 
 真实形态：
-
 ```
 chain ufw-user-input {
     tcp dport 22222 counter packets 3 bytes 180 accept

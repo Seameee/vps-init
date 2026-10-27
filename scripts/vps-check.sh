@@ -221,6 +221,13 @@ recon() {
     echo "tcp_bbr 在 /etc/modules: $(grep -c '^tcp_bbr' /etc/modules 2>/dev/null) 处"
   else
     echo "时区: $(timedatectl show -p Timezone --value 2>/dev/null)  NTP同步: $(timedatectl show -p NTPSynchronized --value 2>/dev/null)"
+    # 服务 active ≠ 同步成功：机房常封 UDP/123，timesyncd 会静默超时（hardening.md §5）
+    if [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" != yes ]; then
+      if journalctl -u systemd-timesyncd --no-pager -n 40 2>/dev/null | grep -q 'Timed out waiting for reply'; then
+        echo "  ⚠️  timesyncd 在超时重试 -> 出站 UDP/123 被机房封锁（clock=$(cat /sys/devices/system/clocksource/clocksource0/current_clocksource 2>/dev/null)）"
+        echo "      换 chrony/NTS 都没用（时钟交换仍走 UDP/123）；KVM 下 kvm-clock 由宿主提供，偏差用小脚本量（hardening.md §5）"
+      fi
+    fi
     echo "journald: $(journalctl --disk-usage 2>/dev/null | grep -oE '[0-9.]+[KMG]' | head -1)  限额: $(grep -hE '^SystemMaxUse' /etc/systemd/journald.conf /etc/systemd/journald.conf.d/*.conf 2>/dev/null | tail -1 || echo 未设)"
     echo "unattended-upgrades: $(systemctl is-active unattended-upgrades 2>/dev/null)  needrestart: $(have needrestart && echo 已装 || echo 未装)"
     echo "rsyslog: $(systemctl is-active rsyslog 2>/dev/null)（Debian 13 默认为无 -> fail2ban 用 backend=systemd）"

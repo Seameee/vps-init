@@ -1,5 +1,4 @@
 # 收尾加固（更新、日志、内核参数、时间同步、内存）
-
 > 出自 github.com/Seameee/vps-init —— 可用 curl 直接拉取，无需手抄。
 >
 > 本文件除 zram 需按规格判断外，全部属于 **Tier 0（默认必做）**。Tier 2 可选组件（nexttrace / BBRv3-lite / 换源 / 代理 / rfw / 蜜罐）见 `optional.md`。
@@ -11,14 +10,11 @@
 | 蜜罐 / rfw / Docker / 探针 / 代理脚本 | **Tier 2** | **默认不装**，需用户明确要求 |
 
 > 资源受限的机器上，**少装东西**本身就是最重要的优化。
-
 ## 1. 系统更新：`apt upgrade` 会漏掉内核安全更新 ⚠️
-
 ```bash
 apt-get upgrade --dry-run       | grep -c '^Inst'   # → 0
 apt-get full-upgrade --dry-run  | grep -c '^Inst'   # → 2
 ```
-
 同一个已 `apt update` 过的系统：`apt upgrade` 计划安装 **0** 个包；`full-upgrade` 计划安装 **2** 个，被扣下的正是 `linux-image-6.12.107+deb13-amd64` 与 `linux-image-amd64`。
 
 **原因**：新内核是一个**新包名**（6.12.107 vs 当前 6.12.74）。`apt upgrade` 从不安装新包，只有 `full-upgrade` 会。于是 `apt upgrade` 之后系统看起来"已更新完成"，但**内核安全补丁永远不会被应用**。
@@ -39,9 +35,7 @@ needrestart -b | grep -E 'KCUR|KEXP|KSTA'
 ```
 
 > ⚠️ **不要由 agent 擅自重启服务器**：会中断所有会话，必须由用户决定时机。只报告"需要重启"。
-
 ## 2. unattended-upgrades（自动安全更新）
-
 ```bash
 apt-get install -y unattended-upgrades
 cat > /etc/apt/apt.conf.d/20auto-upgrades <<'CONF'
@@ -50,7 +44,6 @@ APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";
 CONF
 ```
-
 验证配置真能跑（干跑不要加 `--debug`，输出极长且容易被管道 SIGPIPE 中断）：
 ```bash
 timeout 90 unattended-upgrade --dry-run > /tmp/uu.log 2>&1; echo $?
@@ -58,14 +51,11 @@ grep -iE 'error|traceback' /tmp/uu.log      # 期望无输出
 systemctl list-timers 'apt-daily*' --no-pager
 timeout 100 unattended-upgrade --dry-run --verbose 2>&1 | grep -i "Allowed origins"
 ```
-
 ### ⚠️ 键名发行版相关：Debian 13 用 `Origins-Pattern`，**不是** `Allowed-Origins`
-
 大量教程教你改 `Unattended-Upgrade::Allowed-Origins`。**Debian 13 的 `/etc/apt/apt.conf.d/50unattended-upgrades` 里根本没有这个键**（全文件 165 行、132 行注释，只有 `Origins-Pattern` 和 `Package-Blacklist`）。改一个不存在的键 = 白改，且不报错。而 **Ubuntu 26.04 用的正是 `Allowed-Origins`**——动手前先确认：
 ```bash
 grep -nE 'Origins-Pattern|Allowed-Origins' /etc/apt/apt.conf.d/50unattended-upgrades
 ```
-
 Ubuntu 实测生效值（`--dry-run --verbose`）：`Allowed origins are: o=Ubuntu,a=resolute, o=Ubuntu,a=resolute-security, o=UbuntuESMApps,a=resolute-apps-security, o=UbuntuESM,a=resolute-infra-security`
 
 **Debian 13 的实际写法**：
@@ -77,16 +67,13 @@ Unattended-Upgrade::Origins-Pattern {
         "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
 };
 ```
-
 实测生效值：
 ```
 Allowed origins are: origin=Debian,codename=trixie,label=Debian,
                      origin=Debian,codename=trixie,label=Debian-Security,
                      origin=Debian,codename=trixie-security,label=Debian-Security
 ```
-
 ### 第三方源（Docker / nexttrace 等）
-
 **默认行为是正确的：第三方源不会自动升级**。想让它自动更新必须**逐个精确指定**，先查出该源真实 origin/label（不要猜）：
 
 ```bash
@@ -94,7 +81,6 @@ apt-cache policy <包名>
 cat /var/lib/apt/lists/<该源>_InRelease | grep -E '^(Origin|Label|Suite|Codename):'
 grep -rhE '^(deb|URIs)' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null
 ```
-
 然后加进 `Origins-Pattern`：`"origin=Docker,label=Docker CE";`
 
 > ⚠️ **绝对不要写 `o=*` 或 `l=*` 图省事**。`o=*` 确实会被接受，但它让**任意**第三方源都进入自动升级范围——等于把供应链信任面无限放大。
@@ -102,9 +88,7 @@ grep -rhE '^(deb|URIs)' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/nu
 > **特例（nexttrace 源）**：该源 `InRelease` **只有 `Date` 和校验和，没有 `Origin`/`Label`/`Suite` 字段**，**无法**用 `Origins-Pattern` 精确匹配，应**保持手动更新**。
 
 **装内核后会自动重启吗？默认不会**——`//Unattended-Upgrade::Automatic-Reboot "false";` 被注释 = 默认 false，`apt-config dump` 无输出。UU 可自动装新内核，**但不会自动重启**。若要启用需显式设 `Automatic-Reboot "true"` 与 `Automatic-Reboot-Time`，并清楚它会无预警中断所有会话。
-
 ## 3. journald 限额（比 logrotate 管 journal 文件正确得多）
-
 **⚠️ 不要用 logrotate + `copytruncate` 轮转 `/var/log/journal/*.journal`**，那是反模式，会损坏 journal 文件、造成记录丢失或失序。配置 journald 自身：
 
 ```bash
@@ -131,9 +115,7 @@ ls /var/log/syslog /var/log/auth.log 2>/dev/null || echo "这些文件不存在�
 ```
 
 - 若确实要写，注意 **`size` 与 `daily` 同时出现时 `size` 优先**。写完用 `logrotate -d /etc/logrotate.d/<file>` 干跑验证语法。
-
 ## 4. sysctl / BBR
-
 **容器（LXC/Docker/WSL）内不要改这些**：sysctl 作用于宿主或直接报错。`systemd-detect-virt` 输出 lxc/docker/openvz → 跳过本节。
 
 ```bash
@@ -164,10 +146,10 @@ sysctl -n net.core.default_qdisc             # fq
 ```
 
 **注意**：`ss -tin` 里看到 `bbr` 只对**新**连接生效，已建立的连接仍用旧算法，属正常。若 `sysctl -n net.ipv4.tcp_available_congestion_control | grep bbr` 为空，先 `modprobe tcp_bbr`。
-
 ## 5. 时间同步（chrony vs systemd-timesyncd）
 
 默认 `systemd-timesyncd` 已能满足基本 NTP 需求，**不必盲目换 chrony**。需要更精确/更稳定（跑数据库、证书签发）再换：
+
 ```bash
 apt-get install -y chrony
 systemctl disable --now systemd-timesyncd     # 二者不能共存
@@ -177,8 +159,65 @@ chronyc tracking
 
 - 时区：`timedatectl set-timezone Asia/Shanghai`，验证 `timedatectl show -p Timezone --value`。**不要**用 `date +%Z` 判断时区（`CST` 可能是 China Standard Time，也可能是美国 Central Standard Time）。
 
-## 6. zram / earlyoom
+### 🔴 坑：`NTPSynchronized: no` 但 timesyncd 显示 active —— 多半是**机房封了 UDP/123**
 
+`systemctl is-active systemd-timesyncd` = `active`、`timedatectl` 里 `NTP service: active`，
+**都不代表同步成功**。要单独看 `System clock synchronized`。实测某 HK VPS：
+
+```
+System clock synchronized: no
+       NTP service: active
+```
+
+`journalctl -u systemd-timesyncd` 里全是 `Timed out waiting for reply from ...:123`（Google / pool / 阿里 / 腾讯 / IPv6 目标**全部超时**），
+而同一台机器 **UDP/53 正常、TCP/443 正常** → 是**机房层对 UDP 123 的封锁**，不是本机配置问题。
+
+**别急着换 chrony**（一样走 UDP/123，换了不会好），也别急着改 `NTP=` 服务器列表。先确诊：
+
+```bash
+# 真发一个 NTP 包看有没有回（有回 = 通；TimeoutError = 出站被封）
+python3 - <<'EOF'
+import socket
+for h in ["162.159.200.1","ntp.aliyun.com","time1.google.com"]:
+    s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(4)
+    try: s.sendto(b'\x23'+47*b'\0',(h,123)); d,_=s.recvfrom(48); print(h,"REPLY")
+    except Exception as e: print(h,type(e).__name__)
+    finally: s.close()
+EOF
+# 对照：UDP 出站是不是整体被封（DNS/53 该通）
+```
+
+**NTS（TCP/4460）救不了**：NTS-KE 握手走 TCP，但**时钟交换仍然走 UDP/123**；实测 4460 可连、时钟照样不通。
+
+**封闭环境下的实际做法**：
+
+1. **接受它**，但把偏差量出来 —— 用 HTTPS 的 `Date` 头当参照（1s 精度，多取几次看最小偏移）：
+
+   ```bash
+   python3 - <<'EOF'
+   import urllib.request,email.utils,datetime,time
+   offs=[]
+   for _ in range(8):
+       try:
+           r=urllib.request.urlopen(urllib.request.Request("https://raw.githubusercontent.com/Seameee/vps-init/main/README.md",method="HEAD"),timeout=8)
+           offs.append(datetime.datetime.now(datetime.timezone.utc).timestamp()-email.utils.parsedate_to_datetime(r.headers["Date"]).timestamp())
+       except Exception: pass
+       time.sleep(1)
+   print("样本:", " ".join(f"{o:+.2f}" for o in offs), "| 最小偏移", f"{min(offs):+.2f}s" if offs else "-")
+   EOF
+   ```
+
+2. **KVM 机器通常不用管**：`cat /sys/devices/system/clocksource/clocksource0/current_clocksource` = `kvm-clock`
+   表示时钟由**宿主机**提供（宿主机自己同步），实测偏差在 ±0.3s 内，日常足够。
+   **这才是"没 NTP 也没跑偏"的原因**，不是"没事"。
+3. **容器内**：时钟本来就来自宿主，**禁止**在容器里改时间/NTP。
+4. 机器要跑**证书签发 / 数据库 / 强时效校验**时，才值得:
+   - 找机房是否提供内网 NTP（`grep -r ntp /etc/`、问服务商）；
+   - 或用 **HTTPS 授时的客户端**（如 `chrony` 的 `nts` 不适用，改用带 `--http` 的方式：`curl -sI https://... | grep -i ^date` 手动校时，非自动方案）。
+
+> 验收口径：`timedatectl` 的 `System clock synchronized: no` **照实报告**，并说明"机房封 UDP/123，已测偏差 < 0.5s"。
+> **不要**把它写进"全部通过"，也不要假装它同步了。
+## 6. zram / earlyoom
 | 条件 | 建议 |
 |---|---|
 | 内存 < 2GB 且**非容器**、有 swap 分区 | 可选 zram（`zram-tools`），`ALGO=zstd`、`PERCENT=50` |
@@ -192,18 +231,13 @@ sed -i 's/^#\?ALGO=.*/ALGO=zstd/; s/^#\?PERCENT=.*/PERCENT=50/' /etc/default/zra
 systemctl restart zramswap
 zramctl
 ```
-
 ## 7. needrestart
-
 ```bash
 apt-get install -y needrestart
 needrestart -b          # 机器可读输出，便于 agent 解析
 ```
-
 `needrestart -b` 会把**所有**需重启的服务都列出来（`NEEDRESTART-SVC:` 行），很多是常规库更新，不一定都要立刻重启。重点关注 `KSTA` 与关键服务。
-
 ## 8. sudo 日志（🔴 先确认用的是 sudo 还是 sudo-rs）
-
 Ubuntu 26.04 用的是 **`sudo-rs`**（Rust 重写版，`sudo -V` 显示 `sudo-rs 0.2.13-0ubuntu1.2`），向 `/etc/sudoers.d/` 写入 `logfile` / `log_input` / `iolog_dir` 后 `visudo -c` 报：
 ```
 /etc/sudoers.d/99-vps-init-log:1:10: syntax error: unknown setting: 'logfile'
@@ -220,7 +254,6 @@ visudo: invalid sudoers file
 journalctl --since "1 minute ago" | grep sudo
 #   sudo[5443]: root :  PWD=/root ; USER=nobody ; COMMAND=/usr/bin/true
 ```
-
 所以 Ubuntu 上**跳过这一节的配置**即可。传统 sudo（Debian 等）的写法：
 ```bash
 sudo -V | head -1        # "Sudo version x.y" = 传统；"sudo-rs ..." = Rust 版
@@ -236,9 +269,7 @@ visudo -c                    # 必须校验，写错文件会锁死 sudo
 ```
 
 > `/etc/sudoers.d/` 下的文件**权限必须是 440（或 400）且属主 root**，否则 sudo 拒绝加载。每次修改后**一定** `visudo -c`——这也是能在造成实际影响前发现 sudo-rs 不兼容的原因。**sudoers 设置也是发行版/实现相关的**，失败就回退最小配置。
-
 ## 9. 卸载 snap（Ubuntu 默认必做）
-
 Ubuntu Server 默认装 `snapd`，即使**一个 snap 包都没装**也会带来：常驻 `snapd` 服务、`/snap` 挂载机制、自动刷新（`snapd.refresh.timer`）后台占用，以及把 `firefox`/`chromium-browser` 这类包的 apt 候选**偷换成 snap 跳板包**（`1snap1-0ubuntu9.1` 这种版本号）。服务器上属于纯负担。
 ```bash
 command -v snap                                  # 是否装了
@@ -248,9 +279,7 @@ apt-cache rdepends --installed snapd             # 谁依赖它
 ```
 
 **关键判断**：`snap list` **非空**就先迁走，否则卸载会连带删掉应用数据；为空（常见于纯服务器）可安全卸载。实测（Ubuntu 26.04）：`purge snapd` **只移除 snapd 自己**；`command-not-found` 只是 `Suggests: snapd`，**可以保留**（实测重装它不会带回 snapd）。
-
 ### 完整卸载（4 步，缺一不可）
-
 ```bash
 export DEBIAN_FRONTEND=noninteractive
 # 1) 卸载主体（--purge 连配置一起）
@@ -278,9 +307,7 @@ SH
 # 4) 验证（改过 sudoers 必须 visudo）
 visudo -c
 ```
-
 ### ⚠️ 陷阱：只做 `apt purge snapd` 是不够的
-
 purge 之后 `snap` 命令没了、`/snap` 目录也删了，但 **`sudo` 与登录 shell 的 PATH 里仍留着 `/snap/bin`**——分别来自 `/etc/sudoers` 的 `secure_path`、`/etc/environment`、`/etc/profile.d/apps-bin-path.sh`。**apt purge 不会清理这些**，必须按上面第 3 步手动清并用 `bash -lc 'echo $PATH'` 复验。
 
 **验证（必须做，否则你以为清干净了）**：
@@ -293,9 +320,7 @@ apt-cache policy snapd | grep Candidate   # 应为 (none) ← 证明 Pin 生效
 bash -lc 'echo $PATH' | grep snap && echo "⚠️ PATH 仍有残留" || echo "PATH 干净"
 grep -rn '/snap/bin' /etc/environment /etc/sudoers /etc/profile.d/ 2>/dev/null
 ```
-
 ### 副作用：想装 firefox/chromium 会报错（这是预期行为）
-
 ```
 $ apt-get -s install firefox
  firefox : PreDepends: snapd (>= 2.54) but it is not installable
@@ -312,9 +337,7 @@ echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] \
 https://packages.mozilla.org/apt mozilla main" > /etc/apt/sources.list.d/mozilla.list
 apt-get update && apt-get install -y firefox
 ```
-
 ## 10. 其他建议项
-
 - `passwd -l root`：锁定 root 密码（不影响密钥登录）。仅在确认有非 root sudo 用户可登录后执行。
 - `cloud-init`：若镜像带 cloud-init，它会管理 sshd 配置与 root 登录策略（`/etc/cloud/cloud.cfg` 有 `disable_root: true`）。改 SSH 前先看 `/etc/cloud/cloud.cfg.d/*.cfg` 里的 `ssh_pwauth` / `disable_root`，否则重启后被覆盖。
 - 定期巡检：`lynis` 或本 skill 的 `sh scripts/vps-check.sh recon` 重跑做基线对比。

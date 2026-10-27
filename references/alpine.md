@@ -1,11 +1,8 @@
 # Alpine Linux 支持（OpenRC，无 systemd）
-
 > 出自 github.com/Seameee/vps-init —— 可用 curl 直接拉取，无需手抄。
 >
 > 环境：Alpine 3.24.2（内核 6.18.53-0-virt，KVM，2C/3.9G）。**Alpine 与 Debian 差异极大**，照搬 Debian 配置会静默失效。
-
 ## 1. 一分钟速查：Alpine vs Debian/Ubuntu
-
 | 维度 | Debian/Ubuntu | **Alpine** | 影响 |
 |---|---|---|---|
 | init | systemd | **OpenRC** | `systemctl` → `rc-service` / `rc-update` |
@@ -22,9 +19,7 @@
 | `/usr/local/sbin` | 默认存在 | **默认不存在**（但在 PATH 里） | 装脚本前先 `mkdir -p` |
 | 时区 | `timedatectl` | **`/etc/localtime`**（软链） | 无 `timedatectl` |
 | 主机名 | `hostnamectl` | **`/etc/hostname`** (+ `hostname X`) | 镜像可能留 `localhost` |
-
 ## 2. 勘察与包安装
-
 ```bash
 cat /etc/alpine-release                    # 3.24.2
 cat /proc/1/comm                           # init（OpenRC）
@@ -46,9 +41,7 @@ apk add --no-cache fail2ban ufw nftables iptables logrotate zsh git curl wget
 - `--no-cache` 避免保留索引（Alpine 惯例，省磁盘）
 - Alpine 的 `fail2ban` **硬依赖 `iptables`**（不是 nftables）；但 `iptables 1.8.13` 后端是 `nf_tables`，性能等效
 - **`apk add` 后必须 `rc-update add <svc> default`**，否则重启不生效（见 §3）
-
 ## 3. 🔴 ufw 装了但没注册 runlevel
-
 `ufw` 包会装 `/etc/init.d/ufw`，但**不会**自动加入 runlevel。更迷惑的是 `ufw --force enable` 会打印 "enabled on system startup"，**但那是 ufw 自己的 `/etc/ufw/ufw.conf` 里的 `ENABLED=yes`，与 OpenRC 的开机自启是两回事**：
 ```bash
 # 实测：ufw enable 之后
@@ -60,7 +53,6 @@ $ rc-service ufw status
 rc-update add ufw default
 rc-service ufw start             # 用 OpenRC 管理，别只依赖 ufw enable
 ```
-
 ```bash
 rc-update show default | grep ufw          # 应显示 "ufw | default"
 iptables -S | grep -E '^-P INPUT'          # 【关键】应为 -P INPUT DROP
@@ -68,9 +60,7 @@ ufw status | head -1                       # Status: active
 ```
 
 > **判断防火墙是否真的生效，永远看内核规则**（`iptables -S` / `nft list ruleset`），不要只看 `ufw status` 或服务状态。
-
 ## 4. BBR / sysctl（Alpine 差异）
-
 ```bash
 modprobe tcp_bbr
 grep tcp_bbr /proc/sys/net/ipv4/tcp_available_congestion_control || true
@@ -90,9 +80,7 @@ sysctl -n net.core.default_qdisc            # fq
 ```
 
 > `/etc/modules` 由 OpenRC 的 `modules` 服务读取（不同于 systemd 的 `modules-load.d`）。
-
 ## 5. zsh + oh-my-zsh（Alpine）
-
 ```bash
 apk add --no-cache zsh git          # 不是 apt
 # ⚠️ Alpine 没有 chsh —— 直接改 /etc/passwd
@@ -100,11 +88,8 @@ cp /etc/passwd /etc/passwd.bak-vps-init
 sed -i 's|^\(root:[^:]*:[0-9]*:[0-9]*:[^:]*:[^:]*:\).*$|\1/bin/zsh|' /etc/passwd
 grep '^root:' /etc/passwd | cut -d: -f7      # 验证：/bin/zsh
 ```
-
 其余（oh-my-zsh、clone 两个外部插件、最后覆盖 `.zshrc`）与 `zsh.md` 完全相同。
-
 ## 6. 🔴 musl vs glibc：预编译二进制跑不起来
-
 glibc 动态链接的二进制会直接报 `not found`（极具误导性——文件明明存在、权限也对）。
 ```bash
 $ ldd sshesame
@@ -145,42 +130,30 @@ ldd <binary> 2>&1 | head -3
 ```
 
 **好消息**：很多 Go/Rust 项目提供 musl 构建。`rfw` 有 `rfw-x86_64-unknown-linux-musl`（实测直接可用）；`nexttrace_linux_amd64` 本身静态（实测 OK）。
-
 ## 7. 🔴 fail2ban：Alpine 与 systemd 版完全不同
-
 四处必须改（照搬 Debian 配置会**静默失效**）：
-
 ### ① backend 必须是 `auto`（无 journald）
-
 ```ini
 [DEFAULT]
 backend = auto            # 不是 systemd！
 ```
-
 `/etc/fail2ban/paths.conf` 在 Alpine 上是**空的**，所以 `auto` 找不到路径时**必须显式写 `logpath`**：
 ```ini
 [sshd]
 logpath = /var/log/messages
 ```
-
 ### ② 每个 jail 的日志文件不同
-
 - sshd 写 **`/var/log/messages`**（busybox syslogd）
 - sshesame 写 **它自己的 `/var/log/sshesame.log`**（OpenRC 的 `output_log`）
 
 **别把两个 jail 指向同一个文件**（用 `sed` 批量改会导致 sshd jail 也指向 sshesame 的日志，`File list` 看起来"正常"但监控完全错位）。
-
 ### ③ banaction 用 iptables 系列
-
 ```ini
 banaction          = iptables-multiport     # 不是 nftables
 banaction_allports = iptables-allports
 ```
-
 Alpine 的 fail2ban 只带 iptables action 为默认（`nftables*.conf` 文件在，但默认链到 iptables）。
-
 ### ④ 🔴 禁密码后，内置 sshd filter 匹配不到任何东西
-
 `PasswordAuthentication no` 时 sshd **永远不会**产生 `Failed password` 行：
 ```
 $ fail2ban-regex /var/log/messages /etc/fail2ban/filter.d/alpine-sshd.conf
@@ -188,7 +161,6 @@ Lines: 53 lines, 0 ignored, 0 matched, 53 missed      ← 完全失效
 $ fail2ban-regex /var/log/messages /etc/fail2ban/filter.d/sshd.conf
 Lines: 53 lines, 0 ignored, 0 matched, 53 missed      ← 同样失效
 ```
-
 攻击者留下的唯一痕迹是 **`Connection closed ... [preauth]`**（端口扫描），内置 filter 不匹配它：
 ```ini
 # /etc/fail2ban/filter.d/vps-init-sshd.conf
@@ -202,7 +174,6 @@ ignoreregex = ^.*sshd(-session)?\[\d+\]: Accepted (publickey|password) for .*
 [Init]
 maxlines = 10
 ```
-
 实测：同一份日志从 **0 matched → 5 matched**。
 
 > **权衡**：`Connection closed [preauth]` 也可能是正常客户端异常断开，所以 `maxretry` 设 **5**（而非 3）以降低误伤。
@@ -213,19 +184,14 @@ maxlines = 10
 Sep 27 14:03:22 localhost auth.info sshd-session[6266]: Connection closed by <攻击者IP> port 5678 [preauth]
                           ^^^^^^^^^ 多这一层
 ```
-
 用 `^.*` 兜住前缀最稳妥；**不要**行首锚定到 `[`。
-
 ### 关键验证
-
 ```bash
 fail2ban-regex /var/log/messages     /etc/fail2ban/filter.d/vps-init-sshd.conf | grep Lines   # matched > 0
 fail2ban-regex /var/log/sshesame.log /etc/fail2ban/filter.d/sshesame.conf      | grep Lines   # matched > 0
 # 两个都必须 matched > 0，否则等于没装
 ```
-
 ## 8. OpenRC 服务（替代 systemd 单元）
-
 ```sh
 #!/sbin/openrc-run
 name="myapp"
@@ -246,24 +212,19 @@ start_pre() {
 	chmod 640 /var/log/myapp.log
 }
 ```
-
 ```bash
 chmod 755 /etc/init.d/myapp
 rc-update add myapp default
 rc-service myapp start
 ```
-
 ### 🔴 `restart` 会杀掉现有 SSH 连接
-
 ```bash
 rc-service sshd restart      # ← 实测：who 从 1 个用户变成 0，连接被切断！
 rc-service sshd reload       # ← 正确：平滑重载，不断连
 ```
 
 **Alpine 上改 SSH 配置一律用 `reload`**。必须有第二条连接或死手开关兜底才能 `restart`。
-
 ## 9. 死手开关（Alpine 版）
-
 两个必须的差异：
 
 1. **shebang 必须是 `#!/bin/sh`** —— 无 bash 时写 `#!/bin/bash` 会导致 `at` 到点执行失败（`sh: bash: not found`），**死手开关形同不存在**。
@@ -284,7 +245,6 @@ HD=/etc/ssh/sshd_config.d/00-hardening.conf
 } > "$HD"
 if /usr/sbin/sshd -t; then rc-service sshd restart; fi
 ```
-
 ```bash
 apk add --no-cache at
 rc-update add atd default
@@ -293,9 +253,7 @@ echo /root/ssh-deadman.sh | at now + 45 minutes && atq
 ```
 
 > 务必用 `sh -n` 验证脚本。其余死手开关的实现陷阱（`Port` 是多值参数不能靠覆盖回退）见 `ssh-firewall.md` §2。
-
 ## 10. 日志轮转（Alpine）
-
 自带 `/etc/periodic/daily/logrotate`（无需 systemd timer），但 **`/var/log/messages` 默认没有轮转规则**（busybox syslogd 会无限增长）。
 ```bash
 cat > /etc/logrotate.d/vps-init <<'CONF'
@@ -314,9 +272,7 @@ logrotate -d /etc/logrotate.conf      # 干跑验证
 ```
 
 > Alpine 用 `copytruncate` 更稳（syslogd 不会重开文件）。
-
 ## 11. Alpine 上各组件可用性
-
 | 组件 | 可用性 | 做法 |
 |---|---|---|
 | ufw | ✅ | **必须 `rc-update add ufw default`**（§3） |

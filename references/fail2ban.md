@@ -1,5 +1,4 @@
 # fail2ban
-
 > 出自 github.com/Seameee/vps-init —— 可用 curl 直接拉取，无需手抄。
 >
 > **最重要的结论**：Debian 13 的 fail2ban 装完看起来"已启用、有 jail、封禁命令返回成功"，**但封禁实际完全没有生效**。3 个独立的坑，每个都能让防护变成摆设，且**全都无法通过读配置文件发现**，必须实测。
@@ -9,9 +8,7 @@
 | 1 | 默认 `banaction=nftables`，但 `nftables` 包不装 | 封禁命令返回成功，防火墙里什么都没发生 |
 | 2 | 改端口后 `reload` 不重建规则 | 规则里还是旧端口，防护打在错端口 |
 | 3 | **jail.d 的 `journalmatch` 覆盖了 filter 的正确值** | OpenSSH 10 进程名变成 `sshd-session`，jail 读不到任何日志 |
-
 ## 1. 坑 3（最隐蔽）：`defaults-debian.conf` 让 fail2ban 读不到 SSH 日志
-
 现象：制造 5 次真实失败登录后 `fail2ban-client status sshd` 仍是 `Currently failed: 0` / `Total failed: 0`。
 根因：Debian 13 的 OpenSSH 是 **10.0p2**，SSH 会话进程改名成 **`sshd-session`**（监听进程仍是 `sshd`）：
 ```
@@ -19,7 +16,6 @@ _SYSTEMD_UNIT = ssh.service
 _COMM         = sshd-session      # ← OpenSSH 10 的新名字
 SYSLOG_IDENTIFIER = sshd-session
 ```
-
 filter 已知此事（`/etc/fail2ban/filter.d/sshd.conf` 第 129 行）：
 ```ini
 journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd + _COMM=sshd-session
@@ -33,7 +29,6 @@ backend = systemd
 journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd      # ← 匹配不到 sshd-session
 enabled = true
 ```
-
 于是 `fail2ban-client get sshd journalmatch` 返回错误的那一个。`journalctl` 1 小时窗口对比：`_COMM=sshd` → **17 行**（多为监听进程/无关行），`_COMM=sshd-session` → **31 行**（真正的认证失败都在这里）。
 
 **修复：用排在 `d` 之后的文件名覆盖。** ⚠️ `jail.d` 按文件名字母序加载，后加载者覆盖先加载者；`'9' < 'd'`，所以 `99-vps-init.conf` **先**加载被覆盖（白写），必须用 `zz-`。
@@ -66,7 +61,6 @@ findtime  = 1d
 bantime   = 1w
 maxretry  = 3
 ```
-
 ```bash
 fail2ban-client -t                  # OK: configuration test is successful
 systemctl restart fail2ban
@@ -88,9 +82,7 @@ grep -iE "Ignore|Ban|Found" /var/log/fail2ban.log | tail
 > ⚠️ `journalctl -o cat` 会剥掉时间戳/主机名前缀，导致**全部 missed**——那是测试方法错，不是 filter 错。**必须用默认输出格式**。
 >
 > **本质**：OpenSSH 升级改了进程名，fail2ban 的发行版默认配置没跟上。凡是"安全组件 + 系统主组件升级"都要怀疑这种错配。**判断方法**：不看配置写得多正确，看 `Total failed` 制造失败后**是否增长**。
-
 ## 2. 坑 1：默认 banaction 是 nftables，但 nftables 包不装
-
 `defaults-debian.conf` 自带 `banaction = nftables`，但 **fail2ban 包并不依赖 `nftables` 包**：
 ```
 fail2ban-client set sshd banip 203.0.113.66
@@ -100,7 +92,6 @@ fail2ban-client get sshd banip
 nft list ruleset
 → (无任何规则)                          # ← 但防火墙里什么都没有
 ```
-
 只有日志说实话：
 ```
 fail2ban.actions NOTICE [sshd] Ban 203.0.113.66
@@ -108,7 +99,6 @@ fail2ban.utils  ERROR  ... stderr: '/bin/sh: 1: nft: not found'
 fail2ban.utils  ERROR  ... returned 127
 fail2ban.actions ERROR  Failed to execute ban jail 'sshd' action 'nftables' ... 'Script error'
 ```
-
 ```bash
 apt-get install -y nftables
 systemctl restart fail2ban        # 必须重启，reload 不足以让 action 重建
@@ -117,7 +107,6 @@ fail2ban-client set sshd banip 203.0.113.66
 nft list ruleset | grep 203.0.113.66     # 必须能看到
 fail2ban-client set sshd unbanip 203.0.113.66   # 清理
 ```
-
 成功后的规则形态：
 ```
 table inet f2b-table {
@@ -128,9 +117,7 @@ table inet f2b-table {
 	}
 }
 ```
-
 ## 3. 坑 2：改了 port 之后，`reload` 留下**过期端口**的封禁规则
-
 nftables action 把端口**烘进规则文本**，该文本在 action 启动时生成一次。
 
 1. jail 写 `port = 22222` → `systemctl reload fail2ban`
@@ -139,9 +126,7 @@ nftables action 把端口**烘进规则文本**，该文本在 action 启动时�
 4. `systemctl restart fail2ban` 后才变成 `tcp dport 22222`
 
 **改端口后必须 `restart`，不能只 `reload`；并把 nft 规则里的 dport 作为关键验证项。**
-
 ## 4. 🔴 上锁前必读：`f2b-guard` 守卫
-
 蜜罐 jail 用 `action = nftables[type=allports]`。为验证封禁逻辑**临时把管理 IP 从 `ignoreip` 移除**，单次蜜罐尝试后就：
 ```
 NOTICE [honeypot-ssh] Found <你的管理IP>
@@ -174,7 +159,6 @@ f2b-guard restart    # 守卫不通过就拒绝重启
 ```bash
 printf '%s\n' '<跳板机IP>' '<其他管理IP>' > /etc/fail2ban/guard-ips
 ```
-
 ③ **兜底**：`ignoreip` 至少要有一个非回环 IP，防止被清成只剩 `127.0.0.1/::1`。
 
 > 设计理由：**管理 IP 会变**（换网络、换跳板、多人运维），硬编码进脚本会立刻失效；自动取当前连接 IP 则永远跟随实际。
@@ -205,11 +189,8 @@ fail2ban-client set honeypot-ssh unbanip <测试IP>                      # ② �
 fail2ban-client set honeypot-ssh banip 203.0.113.66                    # ④ TEST-NET 保留地址，永不涉及真实 IP
 fail2ban-client set honeypot-ssh unbanip 203.0.113.66
 ```
-
 已经锁死了：见 `rollback.md` §4，最快路径是**从另一个 IP 连进去解封**（`ssh -J user@jump.host -p 22222 root@<target> 'fail2ban-client set honeypot-ssh unbanip <你的IP>'`）。⚠️ `ProxyCommand` 含 `%h:%p` 时不要写在带引号的 `-o` 里（报 `Bad stdio forwarding specification`），改用 `ssh -F <配置文件>`。
-
 ## 5. 生效与关键验证
-
 ```bash
 fail2ban-client -t                       # "OK: configuration test is successful"
 systemctl restart fail2ban               # 必须 restart：坑 1 需它重建 action，坑 2 需它重建端口规则
@@ -221,16 +202,12 @@ fail2ban-client set sshd banip 203.0.113.66 && \
   nft list ruleset | grep -q 203.0.113.66 && echo "封禁链路 OK"
 fail2ban-client set sshd unbanip 203.0.113.66
 ```
-
 ## 6. rsyslog 与 journal
-
 - Debian 13 最小安装**没有 rsyslog**，`/var/log/auth.log`、`/var/log/syslog` **都不存在**。
 - 所以 fail2ban 必须用 `backend = systemd`；否则报 "Have not found any log file"。
 - **不要** `apt install rsyslog` 只为满足 fail2ban——systemd 后端更好。
 - 也意味着：**任何针对 `/var/log/syslog`、`/var/log/auth.log` 的 logrotate 配置都是空转**。
-
 ## 7. 封禁方式：用 nft set，不要用 ufw 逐条
-
 `ipset` 是 iptables 时代的同类方案；nftables 系统上**直接用 nft set，不必装 ipset**。
 
 实测（对 50 个保留测试地址逐条封禁）：ufw `ufw insert 1 deny from <IP>` 总耗时 **13.73 秒**、单个 **274.6 ms**、**54 条链上规则**（每 IP 一条）；nft set `nft add element` 总耗时 **0.21 秒**、单个 **4.3 ms**、**1 条规则** + 集合 50 个元素。**nft set 快约 64 倍**：ufw 每次封禁都是一次完整重写（重新序列化全部规则 + 写入 + 重载，Python 启动 + nft 事务），IP 越多越慢且规则线性增长（封 10000 个就是 10000 条规则）；nft set 是常数时间查找（哈希/区间），**始终只有 1 条规则**。
@@ -245,7 +222,6 @@ table inet f2b-table {
 	}
 }
 ```
-
 ⚠️ 清理陷阱：
 
 1. **任何批量操作后必须用计数复核**，不要靠"我跑过清理命令了"：
@@ -266,14 +242,12 @@ table inet f2b-table {
    fail2ban-client get sshd banip              # 复核两边一致
    nft list set inet f2b-table addr-set-sshd
    ```
-
    若已误用 `flush`，`systemctl restart fail2ban` 会把数据库里的封禁重新下发到 nft。
 
 确认 banaction（若显示 `iptables-*` 老版本默认，改掉）：
 ```bash
 grep -rE '^[[:space:]]*banaction' /etc/fail2ban/jail.d/ /etc/fail2ban/jail.conf
 ```
-
 ```ini
 [DEFAULT]
 banaction = nftables
@@ -281,9 +255,7 @@ banaction_allports = nftables[type=allports]
 ```
 
 > `[type=allports]` = 封禁该 IP 的**所有端口**。蜜罐 jail 应该用 allports（连蜜罐的人该被整个拒掉）。
-
 ## 8. 蜜罐日志接入 fail2ban，全局封禁扫描者
-
 **思路**：蜜罐在 22 端口钓鱼，**凡连上来的都是扫描者**。为它单独建 jail，命中后**全端口封禁**。
 
 ```bash
@@ -301,11 +273,8 @@ CONF
 [channel 6] command "ls -la ~/.local/share/TelegramDesktop/tdata ..." requested
 [channel 7] command "locate D877F783D5D3EF8Cs" requested
 ```
-
 若逐条计数会反复触发、日志被 `already banned` 刷屏：`NOTICE [honeypot-ssh] 73.147.19.171 already banned`。只算认证行即可同时抓住"探测"与"爆破"，且不刷屏。
-
 ### ⚠️ 致命陷阱：不要行首锚定到 `[`
-
 实测矩阵（33 行真实日志）：
 
 | failregex | 结果 |
@@ -331,9 +300,7 @@ for l in sys.stdin:
 fail2ban-regex /tmp/only_ip.log /etc/fail2ban/filter.d/sshesame.conf
 # 实测：4 matched / 29 missed（missed 的是命令噪音，符合预期）
 ```
-
 ### 蜜罐 jail（注意 `zz-` 前缀）
-
 ```ini
 # /etc/fail2ban/jail.d/zz-vps-init.conf
 [honeypot-ssh]
@@ -348,7 +315,6 @@ bantime   = 1d
 # 全端口封禁
 action    = nftables[type=allports]
 ```
-
 实测结果（真的抓到了攻击者）：
 ```
 Status for the jail: honeypot-ssh
@@ -359,12 +325,10 @@ Status for the jail: honeypot-ssh
    |- Currently banned: 1
    `- Banned IP list:  73.147.19.171        ← 真实攻击者，不是测试地址
 ```
-
 对应 nft 规则是**全端口**（无 `dport` 限定，与 sshd jail 的 `tcp dport 22222` 形成对比）：
 ```
 meta l4proto tcp ip saddr @addr-set-honeypot-ssh reject with icmp port-unreachable
 ```
-
 `recidive` 读 `/var/log/fail2ban.log`，把反复被封的 IP 升级为长期封禁（实测 1 周）。链路：蜜罐封禁 → 写入 fail2ban.log → recidive 再升级。
 
 注意：**`ignoreip` 必须包含管理 IP**，否则测试连自己的蜜罐就会被封（实测 `127.0.0.1` 触发 `Ignore 127.0.0.1 by ignoreself rule`）；**蜜罐日志量大**（攻击者每条命令一行），必须给 journald 设限额（`SystemMaxUse=200M`，见 `hardening.md` §3）；"封了 IP 蜜罐就没用"是多余的——封禁按 IP，新 IP 照样进来触发记录。

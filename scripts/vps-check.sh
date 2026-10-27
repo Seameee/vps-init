@@ -214,7 +214,7 @@ recon() {
     echo "tcp_bbr 在 /etc/modules: $(grep -c '^tcp_bbr' /etc/modules 2>/dev/null) 处"
   else
     echo "时区: $(timedatectl show -p Timezone --value 2>/dev/null)  NTP同步: $(timedatectl show -p NTPSynchronized --value 2>/dev/null)"
-    echo "journald: $(journalctl --disk-usage 2>/dev/null | grep -oE '[0-9.]+[KMG]' | head -1)  限额: $(grep -hE '^SystemMaxUse' /etc/systemd/journald.conf 2>/dev/null || echo 未设)"
+    echo "journald: $(journalctl --disk-usage 2>/dev/null | grep -oE '[0-9.]+[KMG]' | head -1)  限额: $(grep -hE '^SystemMaxUse' /etc/systemd/journald.conf /etc/systemd/journald.conf.d/*.conf 2>/dev/null | tail -1 || echo 未设)"
     echo "unattended-upgrades: $(systemctl is-active unattended-upgrades 2>/dev/null)  needrestart: $(have needrestart && echo 已装 || echo 未装)"
     echo "rsyslog: $(systemctl is-active rsyslog 2>/dev/null)（Debian 13 默认为无 -> fail2ban 用 backend=systemd）"
   fi

@@ -1,5 +1,6 @@
 # 回滚与救援
 > 出自 github.com/Seameee/vps-init —— 可用 curl 直接拉取，无需手抄。
+
 ## 1. 事前：让回滚成为可能
 **执行任何有风险的操作前**，先确认你有以下至少一条退路：
 
@@ -12,6 +13,7 @@
 | 快照 / 备份 | 面板里有快照 | 最省事的兜底 |
 
 **唯一绝对不能做的**：在只有一个 SSH 入口、且没有上述任何退路的情况下改 SSH/防火墙。
+
 ## 2. SSH 登不上了
 按可能性从高到低排查（需要控制台或救援模式）：
 ```bash
@@ -39,6 +41,7 @@ ufw allow 22/tcp 2>/dev/null || true
 ```
 
 > 只要能进一次，就有机会修好一切。安全永远让位于可达性——先恢复访问，再重新加固。
+
 ## 3. 防火墙把自己锁了
 ```bash
 ufw disable                      # 立刻放开（最简单）
@@ -46,6 +49,7 @@ ufw status numbered && ufw delete <编号>   # 或只删掉错的规则
 ```
 
 > **Docker 场景**：`ufw disable` 之后 Docker 发布端口依然开放（Docker 直接写 iptables/nft，不看 ufw）。别以为关了 ufw 就安全了，见 `ssh-firewall.md` §11。
+
 ## 4. fail2ban 封了自己（🔴 会被完全锁在门外）
 jail 用 `action = nftables[type=allports]`（蜜罐 jail 的推荐配置）时，**封禁是"全端口"的**：管理 IP 一旦被 ban，**连真 SSH 端口（22222）也是 `Connection closed`**，整台机器无法登录。实测现象：为测试封禁逻辑临时从 `ignoreip` 移除管理 IP，单次蜜罐尝试后立刻 `Ban <你的管理IP>`，随后直连 22222 报 `Connection closed by <目标IP> port 22222`。
 ### 恢复方法（按推荐顺序）
@@ -75,6 +79,7 @@ fail2ban-client get honeypot-ssh ignoreip                # 每次改完复核生
 ```
 
 > `ignoreip` 是最后一道保险。**动了它，就等于把唯一的钥匙也锁进保险箱**——尤其 `action` 是 `allports` 时，封禁会连同管理通道一起断掉。测试封禁逻辑时用可牺牲的来源 IP（跳板机、临时 VPS）。另外 `recidive` 读 `fail2ban.log`，会把反复被封的 IP 升级成长封（默认 1 周），所以"等它自然过期"通常不现实——**优先换 IP 或控制台恢复**。
+
 ## 5. 蜜罐占着 22 导致连不上真 SSH
 ```bash
 systemctl disable --now sshesame            # 或 endlessh
@@ -83,6 +88,7 @@ printf 'Port 22\n' > /etc/ssh/sshd_config.d/00-restore22.conf
 /usr/sbin/sshd -t && systemctl restart ssh
 ss -tlnp | grep ':22 '
 ```
+
 ## 6. 服务起不来的通用排查
 ```bash
 systemctl status <svc> -l --no-pager      # -l 显示完整日志
@@ -96,6 +102,7 @@ systemd-analyze verify /etc/systemd/system/<svc>.service
 |---|---|---|
 | `Failed to set up mount namespacing: <path>: No such file or directory`（status=226/NAMESPACE） | `ReadWritePaths=` 指向的目录不存在 | 先 `install -d` 建目录 |
 | `mkdir /.local: read-only file system` | `ProtectSystem=strict` 下程序试图写 `$HOME` | 显式指定可写路径（如 `-data_dir`）或设 `Environment=HOME=<可写目录>` |
+
 ## 7. 回滚加固配置（正常情况）
 本 skill 的加固都写成**独立的新增文件**，所以回滚 = 删掉/停用这些文件：
 ```bash
@@ -108,6 +115,7 @@ rm /etc/sysctl.d/99-vps-init.conf /etc/systemd/journald.conf.d/99-vps-init.conf 
 rm /etc/sudoers.d/99-vps-init-log                                                # sudo 日志
 sysctl --system && systemctl restart systemd-journald
 ```
+
 ## 8. 每次改动前的最小备份
 ```bash
 BK=/root/vps-init-backup-$(date +%Y%m%d-%H%M%S)

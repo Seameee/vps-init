@@ -2,7 +2,9 @@
 > 出自 github.com/Seameee/vps-init —— 可用 curl 直接拉取，无需手抄。
 >
 > 环境：Alpine 3.24.2（内核 6.18.53-0-virt，KVM，2C/3.9G）。**Alpine 与 Debian 差异极大**，照搬 Debian 配置会静默失效。
+
 ## 1. 一分钟速查：Alpine vs Debian/Ubuntu
+
 | 维度 | Debian/Ubuntu | **Alpine** | 影响 |
 |---|---|---|---|
 | init | systemd | **OpenRC** | `systemctl` → `rc-service` / `rc-update` |
@@ -19,6 +21,7 @@
 | `/usr/local/sbin` | 默认存在 | **默认不存在**（但在 PATH 里） | 装脚本前先 `mkdir -p` |
 | 时区 | `timedatectl` | **`/etc/localtime`**（软链） | 无 `timedatectl` |
 | 主机名 | `hostnamectl` | **`/etc/hostname`** (+ `hostname X`) | 镜像可能留 `localhost` |
+
 ## 2. 勘察与包安装
 ```bash
 cat /etc/alpine-release                    # 3.24.2
@@ -41,6 +44,7 @@ apk add --no-cache fail2ban ufw nftables iptables logrotate zsh git curl wget
 - `--no-cache` 避免保留索引（Alpine 惯例，省磁盘）
 - Alpine 的 `fail2ban` **硬依赖 `iptables`**（不是 nftables）；但 `iptables 1.8.13` 后端是 `nf_tables`，性能等效
 - **`apk add` 后必须 `rc-update add <svc> default`**，否则重启不生效（见 §3）
+
 ## 3. 🔴 ufw 装了但没注册 runlevel
 `ufw` 包会装 `/etc/init.d/ufw`，但**不会**自动加入 runlevel。更迷惑的是 `ufw --force enable` 会打印 "enabled on system startup"，**但那是 ufw 自己的 `/etc/ufw/ufw.conf` 里的 `ENABLED=yes`，与 OpenRC 的开机自启是两回事**：
 ```bash
@@ -60,6 +64,7 @@ ufw status | head -1                       # Status: active
 ```
 
 > **判断防火墙是否真的生效，永远看内核规则**（`iptables -S` / `nft list ruleset`），不要只看 `ufw status` 或服务状态。
+
 ## 4. BBR / sysctl（Alpine 差异）
 ```bash
 modprobe tcp_bbr
@@ -80,6 +85,7 @@ sysctl -n net.core.default_qdisc            # fq
 ```
 
 > `/etc/modules` 由 OpenRC 的 `modules` 服务读取（不同于 systemd 的 `modules-load.d`）。
+
 ## 5. zsh + oh-my-zsh（Alpine）
 ```bash
 apk add --no-cache zsh git          # 不是 apt
@@ -89,6 +95,7 @@ sed -i 's|^\(root:[^:]*:[0-9]*:[0-9]*:[^:]*:[^:]*:\).*$|\1/bin/zsh|' /etc/passwd
 grep '^root:' /etc/passwd | cut -d: -f7      # 验证：/bin/zsh
 ```
 其余（oh-my-zsh、clone 两个外部插件、最后覆盖 `.zshrc`）与 `zsh.md` 完全相同。
+
 ## 6. 🔴 musl vs glibc：预编译二进制跑不起来
 glibc 动态链接的二进制会直接报 `not found`（极具误导性——文件明明存在、权限也对）。
 ```bash
@@ -130,6 +137,7 @@ ldd <binary> 2>&1 | head -3
 ```
 
 **好消息**：很多 Go/Rust 项目提供 musl 构建。`rfw` 有 `rfw-x86_64-unknown-linux-musl`（实测直接可用）；`nexttrace_linux_amd64` 本身静态（实测 OK）。
+
 ## 7. 🔴 fail2ban：Alpine 与 systemd 版完全不同
 四处必须改（照搬 Debian 配置会**静默失效**）：
 ### ① backend 必须是 `auto`（无 journald）
@@ -191,6 +199,7 @@ fail2ban-regex /var/log/messages     /etc/fail2ban/filter.d/vps-init-sshd.conf |
 fail2ban-regex /var/log/sshesame.log /etc/fail2ban/filter.d/sshesame.conf      | grep Lines   # matched > 0
 # 两个都必须 matched > 0，否则等于没装
 ```
+
 ## 8. OpenRC 服务（替代 systemd 单元）
 ```sh
 #!/sbin/openrc-run
@@ -224,6 +233,7 @@ rc-service sshd reload       # ← 正确：平滑重载，不断连
 ```
 
 **Alpine 上改 SSH 配置一律用 `reload`**。必须有第二条连接或死手开关兜底才能 `restart`。
+
 ## 9. 死手开关（Alpine 版）
 两个必须的差异：
 
@@ -253,6 +263,7 @@ echo /root/ssh-deadman.sh | at now + 45 minutes && atq
 ```
 
 > 务必用 `sh -n` 验证脚本。其余死手开关的实现陷阱（`Port` 是多值参数不能靠覆盖回退）见 `ssh-firewall.md` §2。
+
 ## 10. 日志轮转（Alpine）
 自带 `/etc/periodic/daily/logrotate`（无需 systemd timer），但 **`/var/log/messages` 默认没有轮转规则**（busybox syslogd 会无限增长）。
 ```bash
@@ -272,7 +283,9 @@ logrotate -d /etc/logrotate.conf      # 干跑验证
 ```
 
 > Alpine 用 `copytruncate` 更稳（syslogd 不会重开文件）。
+
 ## 11. Alpine 上各组件可用性
+
 | 组件 | 可用性 | 做法 |
 |---|---|---|
 | ufw | ✅ | **必须 `rc-update add ufw default`**（§3） |

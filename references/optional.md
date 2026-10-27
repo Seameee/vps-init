@@ -4,6 +4,7 @@
 > **默认不装。** 仅在用户明确需要、且机器资源允许时才装。每项记录：版本、改了什么、如何验证、如何回滚。
 
 层级：**nexttrace = Tier 1**；**BBRv3-lite / 代理节点 / rfw / 蜜罐 = Tier 2**；换源与资源开销表按需参考。
+
 ## 1. nexttrace（路由追踪）
 - **用途**：排障看真实路由 / AS 归属 / 地区。**开销**：无常驻进程。**版本**：`NextTrace v1.7.3 (2026-08-23)`。
 - ⚠️ 官方 README 的 URL 容易抄错。**key 和仓库 URI 都在 `releases/latest/download/` 下**，不是 `nxtrace.github.io`。
@@ -34,6 +35,7 @@ Trace Stopped: Destination Reached at Hop 6
 **注意**：输出带 ANSI 颜色码，脚本解析时加 `-n`（不做 DNS 反解）或自行 strip 转义。
 
 回滚：`apt-get remove -y nexttrace`，另可删 `nexttrace.sources` 与 `keyrings/nexttrace.gpg`。
+
 ## 2. BBRv3-lite（拥塞控制与 TCP 调优）
 - **版本**：`bbrv3-lite v8.0.7`。脚本 <https://raw.githubusercontent.com/ike-sh/bbrv3-lite/main/install-alias.sh> 把上游 `net-tcp-tune.sh` 装成 `/usr/local/bin/bbr`（**带 SHA256 校验**）。安装后是 **726KB 的 Bash 脚本**（约 14000+ 行，不是二进制、也不是内核模块）。
 - ⚠️ **不要以为它"只调 sysctl"**。`bbr kernel install` 会真的换内核。
@@ -94,6 +96,7 @@ bbr kernel remove              # 若装过 XanMod：卸载【非运行中】的�
 ```
 
 > 改 sysctl 后 SSH 通道未断（只调缓冲与队列，不动网络基础参数），但 `bbr kernel install` 属于**换内核**，风险等级完全不同。
+
 ## 3. LinuxMirrors 一键换源
 **不是必须的**：默认源（`deb.debian.org`）在境外 VPS 上通常已够快。脚本 <https://linuxmirrors.cn/main.sh>（`SuperManito/LinuxMirrors`，MIT，8737 行）。
 
@@ -119,6 +122,7 @@ bash /tmp/linuxmirrors.sh --abroad --backup true --upgrade-software false --clea
 - ⚠️ **脚本内部会执行 `apt update`，可能超过 4 分钟**。要给足超时或放后台。**超时被中断时务必重新确认源文件状态**（可能停在半改状态）——不要假设"超时=没改"。
 
 回滚：`cp /etc/apt/sources.list.d/debian.sources.bak /etc/apt/sources.list.d/debian.sources && apt-get update`。
+
 ## 4. surge / vless-server 代理节点部署
 - **来源**：<https://raw.githubusercontent.com/mozisen/surge/main/vless-server.sh>。**版本**：`多协议代理一键部署脚本 v3.7.2`（**30,892 行 / 1.2 MB**）。
 - 协议：`VLESS+Reality`、`+Reality+XHTTP`、`VLESS+WS`、`VMess+WS`、`VLESS-XTLS-Vision`、`SOCKS5`、`SS2022`、`Hysteria2`、`Trojan`、`Snell v4/v5/v6`、`AnyTLS`、`TUIC`、`NaïveProxy`；可选 `ShadowTLS`。
@@ -130,6 +134,7 @@ bash /tmp/linuxmirrors.sh --abroad --backup true --upgrade-software false --clea
 注意：① **它是交互式的**，不适合自动化盲跑（需人选协议、填域名/端口）；② **它会开代理端口**，装之前先在防火墙规划好放行端口，**别和真 SSH 端口混淆**；③ 它调用外部二进制（xray/sing-box 等核心），先确认版本来源；④ 它写 `/etc/resolv.conf`（**会先备份为 `.bak`**）与 `/etc/sysctl.d`；⑤ 1C1G 跑 Xray + Nginx + ACME 可接受，但**不要同时装多个核心**。
 
 > ⚠️ 未在本机执行实际部署（会开代理端口、改动面大，超出初始化范畴）。以上为静态审阅 + `--help` 验证。
+
 ## 5. rfw（eBPF/XDP 防火墙）
 项目 <https://github.com/narwhal-cloud/rfw>（Rust + eBPF/XDP）。按**端口**拦不住的滥用，用按**国家方向** + **协议特征（DPI）** 的方式拦：
 ```bash
@@ -265,6 +270,7 @@ umount /sys/fs/bpf 2>/dev/null && mount -t bpf bpf /sys/fs/bpf   # 清 pin 残�
 ```
 
 > 未验证项：从 CN 侧的真实来源流量端到端 GeoIP 拦截（已用 `bpftool` 证明 6163 条 CN 前缀入 map，即"数据已加载、规则会命中"）；`--block-fet-*`/`--block-quic` 的实际命中。
+
 ## 6. SSH 蜜罐（sshesame / endlessh）
 > **⚠️ Tier 2 可选，默认不装。** 蜜罐会 ① 常驻一个进程；② 产生**大量日志**（每条命令一行）；③ 要求真 sshd 先让出 22 端口（带来锁死风险）。**1C1G/512M 的极小机器上不要装**——收益远小于复杂度；Tier 1 的 fail2ban + 防火墙已能挡住绝大部分爆破。若决定要装，**优先用 apt 包 `sshesame`**，不要用 Docker 或 GitHub 下载。
 
@@ -372,7 +378,9 @@ systemctl disable --now sshesame   # 回滚
 ```
 
 > 顺序上要**先确保 sshd 能监听 22**（蜜罐已停、端口已释放），再考虑其他调整。
+
 ## 7. 资源开销参考
+
 | 组件 | 常驻进程 | 实测占用 |
 |---|---|---|
 | fail2ban | 是（Python） | ~26 MB 内存峰值 |

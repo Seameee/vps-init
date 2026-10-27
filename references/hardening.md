@@ -10,6 +10,7 @@
 | 蜜罐 / rfw / Docker / 探针 / 代理脚本 | **Tier 2** | **默认不装**，需用户明确要求 |
 
 > 资源受限的机器上，**少装东西**本身就是最重要的优化。
+
 ## 1. 系统更新：`apt upgrade` 会漏掉内核安全更新 ⚠️
 ```bash
 apt-get upgrade --dry-run       | grep -c '^Inst'   # → 0
@@ -35,6 +36,7 @@ needrestart -b | grep -E 'KCUR|KEXP|KSTA'
 ```
 
 > ⚠️ **不要由 agent 擅自重启服务器**：会中断所有会话，必须由用户决定时机。只报告"需要重启"。
+
 ## 2. unattended-upgrades（自动安全更新）
 ```bash
 apt-get install -y unattended-upgrades
@@ -88,6 +90,7 @@ grep -rhE '^(deb|URIs)' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/nu
 > **特例（nexttrace 源）**：该源 `InRelease` **只有 `Date` 和校验和，没有 `Origin`/`Label`/`Suite` 字段**，**无法**用 `Origins-Pattern` 精确匹配，应**保持手动更新**。
 
 **装内核后会自动重启吗？默认不会**——`//Unattended-Upgrade::Automatic-Reboot "false";` 被注释 = 默认 false，`apt-config dump` 无输出。UU 可自动装新内核，**但不会自动重启**。若要启用需显式设 `Automatic-Reboot "true"` 与 `Automatic-Reboot-Time`，并清楚它会无预警中断所有会话。
+
 ## 3. journald 限额（比 logrotate 管 journal 文件正确得多）
 **⚠️ 不要用 logrotate + `copytruncate` 轮转 `/var/log/journal/*.journal`**，那是反模式，会损坏 journal 文件、造成记录丢失或失序。配置 journald 自身：
 
@@ -115,6 +118,7 @@ ls /var/log/syslog /var/log/auth.log 2>/dev/null || echo "这些文件不存在�
 ```
 
 - 若确实要写，注意 **`size` 与 `daily` 同时出现时 `size` 优先**。写完用 `logrotate -d /etc/logrotate.d/<file>` 干跑验证语法。
+
 ## 4. sysctl / BBR
 **容器（LXC/Docker/WSL）内不要改这些**：sysctl 作用于宿主或直接报错。`systemd-detect-virt` 输出 lxc/docker/openvz → 跳过本节。
 
@@ -146,6 +150,7 @@ sysctl -n net.core.default_qdisc             # fq
 ```
 
 **注意**：`ss -tin` 里看到 `bbr` 只对**新**连接生效，已建立的连接仍用旧算法，属正常。若 `sysctl -n net.ipv4.tcp_available_congestion_control | grep bbr` 为空，先 `modprobe tcp_bbr`。
+
 ## 5. 时间同步（chrony vs systemd-timesyncd）
 
 默认 `systemd-timesyncd` 已能满足基本 NTP 需求，**不必盲目换 chrony**。需要更精确/更稳定（跑数据库、证书签发）再换：
@@ -217,7 +222,9 @@ EOF
 
 > 验收口径：`timedatectl` 的 `System clock synchronized: no` **照实报告**，并说明"机房封 UDP/123，已测偏差 < 0.5s"。
 > **不要**把它写进"全部通过"，也不要假装它同步了。
+
 ## 6. zram / earlyoom
+
 | 条件 | 建议 |
 |---|---|
 | 内存 < 2GB 且**非容器**、有 swap 分区 | 可选 zram（`zram-tools`），`ALGO=zstd`、`PERCENT=50` |
@@ -231,12 +238,14 @@ sed -i 's/^#\?ALGO=.*/ALGO=zstd/; s/^#\?PERCENT=.*/PERCENT=50/' /etc/default/zra
 systemctl restart zramswap
 zramctl
 ```
+
 ## 7. needrestart
 ```bash
 apt-get install -y needrestart
 needrestart -b          # 机器可读输出，便于 agent 解析
 ```
 `needrestart -b` 会把**所有**需重启的服务都列出来（`NEEDRESTART-SVC:` 行），很多是常规库更新，不一定都要立刻重启。重点关注 `KSTA` 与关键服务。
+
 ## 8. sudo 日志（🔴 先确认用的是 sudo 还是 sudo-rs）
 Ubuntu 26.04 用的是 **`sudo-rs`**（Rust 重写版，`sudo -V` 显示 `sudo-rs 0.2.13-0ubuntu1.2`），向 `/etc/sudoers.d/` 写入 `logfile` / `log_input` / `iolog_dir` 后 `visudo -c` 报：
 ```
@@ -269,6 +278,7 @@ visudo -c                    # 必须校验，写错文件会锁死 sudo
 ```
 
 > `/etc/sudoers.d/` 下的文件**权限必须是 440（或 400）且属主 root**，否则 sudo 拒绝加载。每次修改后**一定** `visudo -c`——这也是能在造成实际影响前发现 sudo-rs 不兼容的原因。**sudoers 设置也是发行版/实现相关的**，失败就回退最小配置。
+
 ## 9. 卸载 snap（Ubuntu 默认必做）
 Ubuntu Server 默认装 `snapd`，即使**一个 snap 包都没装**也会带来：常驻 `snapd` 服务、`/snap` 挂载机制、自动刷新（`snapd.refresh.timer`）后台占用，以及把 `firefox`/`chromium-browser` 这类包的 apt 候选**偷换成 snap 跳板包**（`1snap1-0ubuntu9.1` 这种版本号）。服务器上属于纯负担。
 ```bash
@@ -337,6 +347,7 @@ echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] \
 https://packages.mozilla.org/apt mozilla main" > /etc/apt/sources.list.d/mozilla.list
 apt-get update && apt-get install -y firefox
 ```
+
 ## 10. 其他建议项
 - `passwd -l root`：锁定 root 密码（不影响密钥登录）。仅在确认有非 root sudo 用户可登录后执行。
 - `cloud-init`：若镜像带 cloud-init，它会管理 sshd 配置与 root 登录策略（`/etc/cloud/cloud.cfg` 有 `disable_root: true`）。改 SSH 前先看 `/etc/cloud/cloud.cfg.d/*.cfg` 里的 `ssh_pwauth` / `disable_root`，否则重启后被覆盖。

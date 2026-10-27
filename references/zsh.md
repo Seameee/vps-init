@@ -2,7 +2,9 @@
 > 出自 github.com/Seameee/vps-init —— 可用 curl 直接拉取，无需手抄。
 >
 > **Tier 1 可选组件，必须询问用户后才装**。它不属于默认必做项：会切换默认 shell、下载用户的个人配置。
+
 ## 1. 依赖清单（先看清再装）
+
 | 组件 | 来源 | 必需性 |
 |---|---|---|
 | `zsh` | apt / apk | 必需 |
@@ -13,6 +15,7 @@
 | 主题 `ys` | oh-my-zsh 内置 | 无需额外下载 |
 
 > **踩坑点**：oh-my-zsh 的 `plugins=(...)` 里写的外部插件**不会自动安装**。引用了未 clone 的插件，开 zsh 会报 `plugin 'zsh-autosuggestions' not found`（或静默不生效）。**必须逐个 clone 到 `${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/`。**
+
 ## 2. 安装步骤
 ```bash
 export DEBIAN_FRONTEND=noninteractive
@@ -41,6 +44,7 @@ zsh -ic 'echo "plugins OK: ${#plugins[@]}"' # 交互式加载，看有无报错
 ```
 ### 关于 `RUNZSH=no CHSH=no`
 两个都要：`RUNZSH=no` —— 装完不要把当前会话切成 zsh（会中断后续脚本）；`CHSH=no` —— 不要自动改默认 shell（我们自己 `chsh`，避免安装器把 shell 切到非预期路径）。
+
 ## 3. 本 skill 内置的用户配置（可直接选用，免下载）
 **`assets/zshrc-seameee.zshrc`** —— 已在 **NoBrand-JP 2**（Debian 13，2026-10-14）实机验证通过。
 
@@ -79,7 +83,9 @@ plugins=(git zsh-autosuggestions zsh-syntax-highlighting z extract web-search)
 source "$ZSH/oh-my-zsh.sh"                              ← 不引用外部文件
 ```
 结论：只需 clone 两个插件，其余（`git`/`z`/`extract`/`web-search`）都是内置。
+
 ## 4. 顺序陷阱
+
 | ❌ 做法 | 后果 |
 |---|---|
 | 先下载 `.zshrc`，再装 oh-my-zsh | `.zshrc` 被 oh-my-zsh 安装器的模板**覆盖** |
@@ -100,6 +106,7 @@ for p in zsh-autosuggestions zsh-syntax-highlighting; do
 done
 zsh -ic 'echo LOADED-OK' 2>&1 | tail -5
 ```
+
 ## 5. 卸载 / 回滚
 ```bash
 chsh -s /bin/bash root                  # 切回 bash

@@ -151,6 +151,9 @@ zsh/蜜罐/rfw/Docker/换内核一律不装，并在报告里写清实际装了�
 | oh-my-zsh 的 `plugins=(...)` 外部插件不会自动装 | 先 `grep -A6 '^plugins='`，clone 到 `custom/plugins/`；顺序：omz → 插件 → 最后覆盖 `.zshrc` |
 | 装完 zsh 当前会话仍是 bash | 正常，`exec zsh` 或重连；别改当前进程的 shell |
 | 脚本用 `set -e` + "预期失败"的检查 → 恢复步骤没执行 | 含预期失败的检查就不要 `set -e`，或 `check \|\| true`；测完复核最终状态 |
+| `dpkg -l <包>` 对**未安装**的包也返回 0（状态是 `un`）→ 误报"装了这个" | 用 `dpkg-query -W -f='${Status}' <包>` 判断是否 `install ok installed` |
+| `systemctl is-active systemd-timesyncd` = active 但 `NTPSynchronized: no` | 机房常封 **UDP/123**（同机 UDP/53、TCP/443 正常）；换 chrony/NTS 都没用，先量偏差（`hardening.md` §5） |
+| `grep 限额 /etc/systemd/journald.conf` 报"未设" | 限额多写在 `/etc/systemd/journald.conf.d/*.conf`，两处都要读 |
 
 ### Alpine 专属
 
@@ -173,12 +176,14 @@ zsh/蜜罐/rfw/Docker/换内核一律不装，并在报告里写清实际装了�
 sh /tmp/vps-check.sh gate        # 失败项直接给修复提示
 ```
 
-`gate` 覆盖：新端口可登、密码认证被拒、`ss -tlnp` 与预期一致、
+`gate` 覆盖：`sshd -T` 报的端口真的在 LISTEN、密码认证被拒、
 防火墙 `policy drop` 且只放行必要端口、`systemctl --failed` 为空（Alpine 用 `rc-status`）、
-`fail2ban-regex` matched>0、`f2b-guard check` 返回 0。
+**filter 对合成攻击样本 matched>0**、`f2b-guard check` 返回 0。
 
 > **不要把「已配置」说成「已验证」。** 特别地：禁密码的机器上 fail2ban 内置 filter
-> 会静默 0 匹配，**必须**用 `fail2ban-regex` 证明 matched > 0。
+> 会静默 0 匹配，**必须**证明 matched > 0。
+> 判据用**合成样本**（`gate` 内置两条伪造攻击行），**不要**要求线上日志有命中——
+> 全新机器没有攻击流量，拿"线上日志 matched>0"当门禁就永远过不了。
 > 交付时写清：改了什么 / 怎么回滚 / 还剩什么可选。
 
 ## 参考文件
